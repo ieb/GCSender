@@ -9,6 +9,7 @@ import pytest
 from gcsender.api import build_router
 from gcsender.controller import Controller
 from gcsender.events import EventBus
+from gcsender.logs import LogRing, Transcript
 from gcsender.simulator import GrblSimulator
 from gcsender.transport import SimTransport
 from gcsender.webserver import AppServer
@@ -18,11 +19,12 @@ TOKEN = "test-token"
 
 
 @pytest.fixture
-def app():
+def app(tmp_path):
     sim = GrblSimulator("0.9j", time_scale=5.0)
     bus = EventBus()
-    controller = Controller(bus, lambda port, baud: SimTransport(sim), poll_interval=0.05)
-    router = build_router(bus, controller, simulator="0.9j")
+    transcript = Transcript(tmp_path / "logs")
+    controller = Controller(bus, lambda port, baud: SimTransport(sim), poll_interval=0.05, transcript=transcript)
+    router = build_router(bus, controller, simulator="0.9j", transcript=transcript, log_ring=LogRing())
     server = AppServer(("127.0.0.1", 0), bus=bus, router=router, web_root=WEB_ROOT, token=TOKEN)
     t = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
     t.start()
@@ -245,3 +247,59 @@ def test_sse_streams_status(app):
     assert msg["data"]["state"] in ("Idle", "Run")
     assert "mpos" in msg["data"] and "wpos" in msg["data"]
     s.close()
+
+
+# --------------------------------------------------------------- phase 1 API
+
+
+def test_grbl_settings_api(app):
+    server, controller, bus = app
+    connect(server)
+    wait_for(lambda: len(call(server, "GET", "/api/grbl/settings")[1]["settings"]) == 31)
+    status, body = call(server, "GET", "/api/grbl/settings")
+    s110 = next(s for s in body["settings"] if s["id"] == 110)
+    assert s110["value"] == 1500.0 and s110["unit"] == "mm/min" and s110["name"] == "X max rate"
+    status, body = call(server, "PUT", "/api/grbl/settings", {"values": {"1": 30}})
+    assert status == 200 and body["results"][0]["status"] == "ok"
+    assert next(s for s in body["settings"] if s["id"] == 1)["value"] == 30
+    assert call(server, "PUT", "/api/grbl/settings", {"values": {"999": 1}})[0] == 400
+    assert call(server, "PUT", "/api/grbl/settings", {"values": {"1": -1}})[0] == 400
+    assert call(server, "PUT", "/api/grbl/settings", {"values": {"1": "x"}})[0] == 400
+    assert call(server, "PUT", "/api/grbl/settings", {"values": {}})[0] == 400
+    assert call(server, "POST", "/api/grbl/settings/refresh", {})[0] == 200
+
+
+def test_app_settings_api(app):
+    server, *_ = app
+    status, body = call(server, "GET", "/api/settings")
+    assert status == 200 and body["statusInterval"] == 200
+    status, body = call(server, "PUT", "/api/settings", {"statusInterval": 120})
+    assert status == 200 and body["statusInterval"] == 120
+    assert call(server, "PUT", "/api/settings", {"statusInterval": 1})[0] == 400
+    assert call(server, "PUT", "/api/settings", {"nope": 1})[0] == 400
+
+
+def test_control_api(app):
+    server, *_ = app
+    connect(server)
+    assert call(server, "POST", "/api/control", {"op": "dance"})[0] == 400
+    status, body = call(server, "POST", "/api/control", {"op": "home"})
+    assert status == 409 and "homing is disabled" in body["error"]
+    assert call(server, "POST", "/api/control", {"op": "unlock"})[0] == 200
+
+
+def test_logs_api(app):
+    server, *_ = app
+    connect(server)
+    call(server, "POST", "/api/command", {"line": "G0X1"})
+    status, body = call(server, "GET", "/api/logs/serial/files")
+    assert status == 200 and len(body["files"]) == 1
+    date = body["files"][0]["date"]
+    conn = http.client.HTTPConnection("127.0.0.1", server.port, timeout=5)
+    conn.request("GET", f"/api/logs/serial?date={date}&t={TOKEN}", headers={"Host": f"127.0.0.1:{server.port}"})
+    resp = conn.getresponse()
+    text = resp.read().decode()
+    assert resp.status == 200 and "attachment" in resp.getheader("Content-Disposition")
+    assert "> G0X1" in text
+    assert call(server, "GET", "/api/logs/serial?date=../../x")[0] == 404
+    assert call(server, "GET", "/api/logs/app")[0] == 200

@@ -95,6 +95,10 @@ class Streamer:
         p.event.set()
         return p
 
+    def head_source(self) -> str | None:
+        with self._cond:
+            return self._inflight[0].source if self._inflight else None
+
     def on_info(self, line: str) -> Pending | None:
         """Attach an informational line to the oldest in-flight command."""
         with self._cond:

@@ -23,6 +23,7 @@ import mimetypes
 import re
 import secrets
 import socket
+import sys
 import threading
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -85,6 +86,15 @@ class Request:
             raise ApiError(400, f"invalid JSON: {e}") from None
 
 
+class RawResponse:
+    """A non-JSON response (e.g. a log download)."""
+
+    def __init__(self, body: bytes, content_type: str, filename: str | None = None):
+        self.body = body
+        self.content_type = content_type
+        self.filename = filename
+
+
 Handler_t = Callable[[Request], Any]
 
 
@@ -134,6 +144,12 @@ class AppServer(ThreadingHTTPServer):
     @property
     def port(self) -> int:
         return self.server_address[1]
+
+    def handle_error(self, request: Any, client_address: Any) -> None:
+        exc = sys.exc_info()[1]
+        if isinstance(exc, (ConnectionError, TimeoutError)):
+            return  # client went away; normal for browsers and SSE
+        log.error("error handling request from %s", client_address, exc_info=exc)
 
     def host_allowed(self, host_header: str | None) -> bool:
         if not host_header:
@@ -271,6 +287,12 @@ class Handler(BaseHTTPRequestHandler):
         result = fn(req)
         if self.command in ("POST", "PUT", "PATCH", "DELETE") and req._body is None:
             req.body()  # drain an unread body so keep-alive stays in sync
+        if isinstance(result, RawResponse):
+            extra = {}
+            if result.filename and re.fullmatch(r"[\w.-]+", result.filename):
+                extra["Content-Disposition"] = f'attachment; filename="{result.filename}"'
+            self._send(200, result.body, result.content_type, extra)
+            return
         if isinstance(result, tuple):
             status, payload = result
         else:

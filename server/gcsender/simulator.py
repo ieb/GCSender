@@ -74,16 +74,16 @@ MASK_SETTINGS = {2, 3, 10, 23}
 
 
 def default_settings(firmware: str) -> dict[int, float]:
-    """C3018-like defaults (no switches, 300x180x45 travel)."""
+    """Defaults copied from the user's C3018 (GRBL 0.9j.20180122, docs/responses.txt)."""
     s: dict[int, float] = {
         0: 10, 1: 25, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0,
         10: 3 if firmware.startswith("0.9") else 1,
         11: 0.010, 12: 0.002, 13: 0, 20: 0, 21: 0, 22: 0, 23: 0,
         24: 25.0, 25: 500.0, 26: 250, 27: 1.0,
-        100: 800.0, 101: 800.0, 102: 800.0,
-        110: 1000.0, 111: 1000.0, 112: 600.0,
-        120: 30.0, 121: 30.0, 122: 30.0,
-        130: 300.0, 131: 180.0, 132: 45.0,
+        100: 400.0, 101: 400.0, 102: 400.0,
+        110: 1500.0, 111: 1500.0, 112: 1500.0,
+        120: 10.0, 121: 10.0, 122: 10.0,
+        130: 200.0, 131: 200.0, 132: 200.0,
     }
     if firmware.startswith("1.1"):
         s.update({30: 1000.0, 31: 0.0, 32: 0})
@@ -618,9 +618,11 @@ class GrblSimulator:
             return
         if cmd == "C":
             if self.state == "Check":
+                # GRBL flags the reset, reports, acknowledges the line, then resets.
                 self._msg("Disabled")
+                self._ok()
                 self._soft_reset()
-                return  # no ok: the reset banner replaces it
+                return
             if self.state != "Idle":
                 raise SimError(8)
             self.state = "Check"
@@ -659,7 +661,7 @@ class GrblSimulator:
                     self._out(f"[VER:1.1f.20170801:{self.persist.build_info}]")
                     self._out(f"[OPT:V,{self.planner_size},{RX_BUFFER_SIZE}]")
                 else:
-                    self._out(f"[0.9j.20160726:{self.persist.build_info}]")
+                    self._out(f"[0.9j.20180122:{self.persist.build_info}]")
             elif cmd.startswith("I="):
                 self.persist.build_info = cmd[2:]
             else:
@@ -676,6 +678,7 @@ class GrblSimulator:
                 self.persist.g28 = [0.0, 0.0, 0.0]
                 self.persist.g30 = [0.0, 0.0, 0.0]
             self._msg("Restoring defaults")
+            self._ok()
             self._soft_reset()
         elif cmd.startswith("N"):
             if cmd == "N":

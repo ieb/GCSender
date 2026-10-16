@@ -21,10 +21,15 @@
       <button id="conn-toggle" type="button" class="primary">Connect</button>
       <span id="conn-info" class="muted"></span>
     </div>
+    <div class="top-actions">
+      <button id="open-settings" type="button" title="GRBL and application settings">Settings</button>
+      <button id="open-logs" type="button" title="Application log and serial transcripts">Logs</button>
+    </div>
     <div class="link" id="link" title="Server link"><span class="dot"></span><span id="link-text">offline</span></div>
   </header>
 
   <div id="banner" class="banner" hidden></div>
+  <div id="warnings" class="warnings" hidden></div>
 
   <main class="layout">
     <section class="col-left">
@@ -43,21 +48,29 @@
           </tbody>
         </table>
         <div id="machine-extra" class="muted small"></div>
-        <div id="machine-modal" class="mono small"></div>
-        <div id="machine-alarm" class="alarm" hidden></div>
+        <div id="machine-modal" class="chips"></div>
+        <div id="machine-alarm" class="alarm" hidden>
+          <div class="alarm-title" id="alarm-title"></div>
+          <div class="alarm-help" id="alarm-help"></div>
+        </div>
       </section>
 
       <section class="panel" id="panel-control">
         <h2>Control</h2>
         <div class="buttons">
-          <button type="button" data-rt="hold" title="Feed hold (!)">Hold</button>
+          <button type="button" data-rt="hold" title="Feed hold (!) — decelerates to a stop">Hold</button>
           <button type="button" data-rt="resume" title="Cycle start / resume (~)">Resume</button>
-          <button type="button" data-rt="reset" class="danger" title="Soft reset (Ctrl-X)">Reset</button>
-          <button type="button" data-cmd="$X" title="Kill alarm lock ($X)">Unlock</button>
-          <button type="button" data-cmd="$H" id="btn-home" title="Homing cycle ($H)">Home</button>
+          <button type="button" data-rt="reset" class="danger" title="Soft reset (Ctrl-X). Offsets and parser state are restored afterwards if enabled in Settings.">Reset</button>
+          <button type="button" data-ctl="unlock" id="btn-unlock" title="Kill alarm lock ($X)">Unlock</button>
+          <button type="button" data-ctl="home" id="btn-home" title="Homing cycle ($H)">Home</button>
+          <button type="button" data-ctl="check" id="btn-check" title="Toggle G-code check mode ($C)">Check</button>
+          <button type="button" data-ctl="sleep" id="btn-sleep" title="Sleep ($SLP, GRBL 1.1)" hidden>Sleep</button>
+        </div>
+        <div class="buttons query-row">
           <button type="button" data-cmd="$G" title="Parser state ($G)">$G</button>
-          <button type="button" data-cmd="$#" title="Offsets ($#)">$#</button>
+          <button type="button" data-cmd="$#" title="Coordinate offsets ($#)">$#</button>
           <button type="button" data-cmd="$$" title="Settings ($$)">$$</button>
+          <button type="button" data-cmd="$I" title="Build info ($I)">$I</button>
         </div>
       </section>
     </section>
@@ -68,14 +81,82 @@
         <div class="placeholder muted">3D view arrives in phase 2.</div>
       </section>
       <section class="panel" id="panel-console">
-        <h2>Console <button type="button" id="console-clear" class="link-button">clear</button></h2>
+        <h2>
+          <span>Console</span>
+          <span class="console-tools">
+            <label title="Show commands sent automatically by GCSender ($G, $#, restore…)"><input type="checkbox" id="console-show-system"> system</label>
+            <label title="Show commands sent by panel buttons"><input type="checkbox" id="console-show-ui" checked> UI</label>
+            <button type="button" id="console-clear" class="link-button">clear</button>
+          </span>
+        </h2>
         <div id="console-out" class="console-out mono" role="log" aria-live="polite"></div>
         <form id="console-form" class="console-form" autocomplete="off">
-          <input id="console-input" class="mono" placeholder="Command, e.g. $$ or G0 X10" spellcheck="false">
+          <input id="console-input" class="mono" placeholder="Command, e.g. $$ or G0 X10" spellcheck="false" list="console-history">
+          <datalist id="console-history"></datalist>
           <button type="submit">Send</button>
         </form>
       </section>
     </section>
   </main>
+
+  <dialog id="dlg-settings" class="dialog">
+    <form method="dialog" class="dialog-head">
+      <div class="tabs" role="tablist">
+        <button type="button" class="tab active" data-tab="grbl" role="tab">Machine (GRBL)</button>
+        <button type="button" class="tab" data-tab="app" role="tab">Application</button>
+      </div>
+      <button class="close" value="close" title="Close">✕</button>
+    </form>
+    <section class="tab-body" data-tab-body="grbl">
+      <p class="muted small" id="grbl-settings-note"></p>
+      <div class="table-wrap">
+        <table class="settings-table">
+          <thead><tr><th>$</th><th>Setting</th><th>Value</th><th>Unit</th></tr></thead>
+          <tbody id="grbl-settings-body"></tbody>
+        </table>
+      </div>
+      <div class="dialog-foot">
+        <span id="grbl-settings-status" class="muted small"></span>
+        <button type="button" id="grbl-settings-reload">Reload</button>
+        <button type="button" id="grbl-settings-save" class="primary" disabled>Write changes</button>
+      </div>
+    </section>
+    <section class="tab-body" data-tab-body="app" hidden>
+      <form id="app-settings-form" class="form-grid">
+        <label for="app-statusInterval">Status query period (ms)</label>
+        <input id="app-statusInterval" name="statusInterval" type="number" min="50" max="2000" step="10">
+        <label for="app-restoreAfterReset">Restore offsets &amp; parser state after Reset</label>
+        <input id="app-restoreAfterReset" name="restoreAfterReset" type="checkbox">
+        <label for="app-resetOnConnect">Send a soft reset after connecting</label>
+        <input id="app-resetOnConnect" name="resetOnConnect" type="checkbox">
+        <label for="app-autoConnect">Connect to the last port when the server starts</label>
+        <input id="app-autoConnect" name="autoConnect" type="checkbox">
+        <label for="app-transcriptStatus">Include status polls in the serial transcript</label>
+        <input id="app-transcriptStatus" name="transcriptStatus" type="checkbox">
+      </form>
+      <div class="dialog-foot">
+        <span id="app-settings-status" class="muted small"></span>
+        <button type="button" id="app-settings-save" class="primary">Save</button>
+      </div>
+    </section>
+  </dialog>
+
+  <dialog id="dlg-logs" class="dialog">
+    <form method="dialog" class="dialog-head">
+      <div class="tabs" role="tablist">
+        <button type="button" class="tab active" data-tab="app-log" role="tab">Application log</button>
+        <button type="button" class="tab" data-tab="transcripts" role="tab">Serial transcripts</button>
+      </div>
+      <button class="close" value="close" title="Close">✕</button>
+    </form>
+    <section class="tab-body" data-tab-body="app-log">
+      <div class="table-wrap"><table class="log-table mono small"><tbody id="app-log-body"></tbody></table></div>
+      <div class="dialog-foot"><button type="button" id="app-log-refresh">Refresh</button></div>
+    </section>
+    <section class="tab-body" data-tab-body="transcripts" hidden>
+      <p class="muted small">Everything exchanged with the controller, one file per day (in the server's state directory).</p>
+      <ul id="transcript-list" class="file-list"></ul>
+    </section>
+  </dialog>
 </body>
 </html>

@@ -11,11 +11,14 @@ from . import __version__
 from .api import SIM_PORT, build_router
 from .controller import Controller, ControllerError
 from .events import EventBus
+from .logs import LogRing, Transcript
 from .simulator import GrblSimulator
+from .store import SettingsStore
 from .transport import SerialTransport, SimTransport, Transport
 from .webserver import AppServer
 
 DEFAULT_WEB_ROOT = Path(__file__).resolve().parents[2] / "web"
+DEFAULT_STATE_DIR = Path.home() / ".gcsender"
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -28,6 +31,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--simulate", choices=["0.9j", "1.1f"], help="provide a simulated GRBL controller as port 'sim'")
     p.add_argument("--sim-no-reset", action="store_true", help="simulated board does not reset when the port opens")
     p.add_argument("--sim-speed", type=float, default=1.0, help="simulator time scale (default 1.0 = real time)")
+    p.add_argument("--state-dir", type=Path, default=DEFAULT_STATE_DIR,
+                   help=f"settings, logs and (later) jobs/heightmaps (default {DEFAULT_STATE_DIR})")
     p.add_argument("--web-root", type=Path, default=DEFAULT_WEB_ROOT, help=argparse.SUPPRESS)
     p.add_argument("--token", help=argparse.SUPPRESS)  # fixed token for development/testing
     p.add_argument("-v", "--verbose", action="store_true")
@@ -38,6 +43,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    log_ring = LogRing()
+    logging.getLogger().addHandler(log_ring)
 
     host, _, port_s = args.http.rpartition(":")
     if not host:
@@ -59,9 +66,12 @@ def main(argv: list[str] | None = None) -> int:
             return SimTransport(sim, reset_on_open=not args.sim_no_reset)
         return SerialTransport(port, baud)
 
+    state_dir: Path = args.state_dir.expanduser()
+    settings = SettingsStore(state_dir / "settings.json")
+    transcript = Transcript(state_dir / "logs")
     bus = EventBus()
-    controller = Controller(bus, make_transport)
-    router = build_router(bus, controller, simulator=args.simulate)
+    controller = Controller(bus, make_transport, settings=settings, transcript=transcript)
+    router = build_router(bus, controller, simulator=args.simulate, transcript=transcript, log_ring=log_ring)
     lan = args.lan or host not in ("127.0.0.1", "localhost", "::1")
     try:
         server = AppServer(
@@ -85,10 +95,14 @@ def main(argv: list[str] | None = None) -> int:
     if sim:
         print(f"simulated GRBL {args.simulate} available as port '{SIM_PORT}'")
 
+    print(f"state directory: {state_dir}")
     autoconnect = args.port or (SIM_PORT if sim else None)
+    if not autoconnect and settings.get("autoConnect") and settings.get("lastPort"):
+        autoconnect = settings.get("lastPort")
     if autoconnect:
         try:
-            controller.connect(autoconnect, args.baud)
+            baud = args.baud if args.port or sim else settings.get("lastBaud")
+            controller.connect(autoconnect, baud)
         except ControllerError as e:
             print(f"auto-connect to {autoconnect} failed: {e}", file=sys.stderr)
 
@@ -100,6 +114,7 @@ def main(argv: list[str] | None = None) -> int:
         server.shutting_down.set()
         bus.close()
         controller.close()
+        transcript.close()
         server.server_close()
         if sim:
             sim.close()

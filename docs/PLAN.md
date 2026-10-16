@@ -83,11 +83,19 @@ SPA shows or hides controls automatically.
 | `errorFormat`, `parserStateFormat` | text, bare `[…]` | numeric, `[GC:…]` |
 | `laserMode` | false | `$32` |
 
-**C3018 assumptions to confirm** (from your `$I` and `$$` output):
-- No limit or home switches (`$22=0`), so machine coordinates are relative to power-on.
+**The user's C3018** (from `docs/responses.txt`):
+- Firmware: `$I` reports `[0.9j.20180122:]`.
+- `$10=3`, so status reports carry both MPos and WPos. This is what GCSender needs.
+- `$13=0` (mm). `$20=$21=$22=0`: no soft limits, no hard limits, no homing. Machine coordinates are therefore relative to power-on.
+- Steps per mm: `$100–$102=400`.
+- Max rates: `$110–$112=1500` mm/min.
+- Accelerations: `$120–$122=10` mm/s².
+- `$130–$132=200` mm. This does not match the real C3018 travel (~300 × 180 × 45). It is harmless while soft limits are off, but jog bounds (P2) must use the app's own machine-bounds setting, not these values.
+- The simulator defaults to exactly these settings.
+
+Still assumed, not yet confirmed:
 - Probe on A5.
 - Spindle `M3/M5`, with or without PWM `S`.
-- Travel about 300 × 180 × 45 mm.
 - CH340 auto-reset when the port opens.
 
 ---
@@ -402,7 +410,7 @@ GET  /api/logs/serial          transcript download
 | Phase | Scope | Acceptance |
 |---|---|---|
 | **P0 Skeleton & simulator** | uv project, CLI, HTTP static/router/auth, event bus + SSE with replay, transport interface, **GRBL 0.9j/1.1f simulator**, SPA shell with api/events/state modules | `uv run gcsender --simulate 0.9j` serves the SPA; the SSE stream shows simulated status; a reload replays without gaps; token, Origin and Host checks pass in tests |
-| **P1 Connect, monitor, console** | Ports/connect, protocol parsing for both firmwares, capabilities, machine model, State/Control panels, console, `$$` editor and `$10` check, error/alarm text, reset with restore, serial transcript | On the real C3018: Idle with MPos/WPos; Hold/Resume/Reset/Unlock; `$$` round-trip; same on the 1.1 simulator |
+| **P1 Connect, monitor, console** ✅ (simulator) | Ports/connect, protocol parsing for both firmwares, capabilities, machine model, State/Control panels, console, `$$` editor and `$10` check, error/alarm text, reset with restore, serial transcript | On the real C3018: Idle with MPos/WPos; Hold/Resume/Reset/Unlock; `$$` round-trip; same on the 1.1 simulator. **Hardware check deferred** (no machine access yet). Verified on the 0.9j and 1.1f simulators, configured with the user's `$$` |
 | **P2 Jog, WCS, spindle, 3D** | Step/continuous jog with dead-man, keyboard map, hard stop, WCS select/zero, G92, go-to, spindle/coolant, WebGL view with live tool and camera controls | Keyboard jog overrun within spec; closing the tab mid-jog stops motion ≤ 300 ms; Esc stop gives no alarm and keeps offsets |
 | **P3 Probe & heightmap** | Z probe (single/two-stage), probe test, heightmap create/auto/probe/edit/library, `.map` v3 I/O, bicubic, server transform + cache, SPA surface render, transformed-program fetch | A 5×4 map on the machine; `.map` interop with Candle; a reload mid-probe continues; the transformed job's Z verified on a test PCB |
 | **P4 Jobs & streaming** | Upload/library, server parser + estimator, streamer job runner, pause/stop/from-line with restore, start/end commands, M6 flow, overrides, SPA program table + progress colouring + markers + bounds + ETA | A 50k-line job streams without stalls; a reload mid-job shows correct progress; ETA within ±15 % |
@@ -423,7 +431,10 @@ GET  /api/logs/serial          transcript download
 ---
 
 ## 11. Risks and open items
-- **Board info:** please share the banner/`$I` and `$$` output to preset `$10`, bounds and rates.
+- **Deferred hardware checks.** Run these on the C3018 when it is available, before relying on P2+ features:
+  - P1 acceptance: connect, Idle with MPos/WPos, Hold/Resume/Reset/Unlock, `$$` round-trip.
+  - Does opening the port reset the board (banner seen)?
+  - Does Hold → Reset leave the position intact with no alarm on the real 0.9j?
 - **DTR reset on server (re)start:** inherent to the CH340 + 328P board. It only matters if the server restarts mid-job; disabling auto-reset (a 10 µF cap RESET–GND) makes that case seamless too. Both paths are supported.
 - **0.9 continuous-jog overrun and software feed-override lag** are documented in the UI; neither is a safety control. The hardware E-stop remains the real stop.
 - **LAN mode** exposes machine control to anyone with the token; it is off by default.

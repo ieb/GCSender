@@ -12,6 +12,10 @@ export function createStore() {
     modal: null,
     offsets: null,
     alarm: null,
+    grblSettings: null,
+    warnings: [],
+    build: null,
+    appSettings: null,
     console: [],
   };
   const listeners = new Set();
@@ -35,6 +39,10 @@ export function createStore() {
         state.modal = r.modal || null;
         state.offsets = r.offsets || null;
         state.alarm = r.alarm || null;
+        state.grblSettings = r["grbl.settings"] || null;
+        state.warnings = r.warnings || [];
+        state.build = r.build || null;
+        state.appSettings = r["app.settings"] || null;
         state.console = (data.console || []).slice(-CONSOLE_LIMIT);
         emit("snapshot");
         return;
@@ -49,7 +57,17 @@ export function createStore() {
       case "modal":
       case "offsets":
       case "alarm":
+      case "warnings":
+      case "build":
         state[type] = data;
+        emit(type, data);
+        return;
+      case "grbl.settings":
+        state.grblSettings = data;
+        emit(type, data);
+        return;
+      case "app.settings":
+        state.appSettings = data;
         emit(type, data);
         return;
       default:

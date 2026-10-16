@@ -54,9 +54,22 @@ export const api = {
   ports: () => request("GET", "/api/ports"),
   connect: (port, baud) => request("POST", "/api/connect", { port, baud }),
   disconnect: () => request("POST", "/api/disconnect", {}),
-  command: (line) => request("POST", "/api/command", { line }),
+  command: (line, source = "console") => request("POST", "/api/command", { line, source }),
   realtime: (op) => request("POST", "/api/realtime", { op }),
+  control: (op) => request("POST", "/api/control", { op }),
+  grblSettings: () => request("GET", "/api/grbl/settings"),
+  grblSettingsRefresh: () => request("POST", "/api/grbl/settings/refresh", {}),
+  grblSettingsWrite: (values) => request("PUT", "/api/grbl/settings", { values }),
+  appSettings: () => request("GET", "/api/settings"),
+  appSettingsWrite: (values) => request("PUT", "/api/settings", values),
+  appLog: () => request("GET", "/api/logs/app"),
+  transcripts: () => request("GET", "/api/logs/serial/files"),
 };
+
+export function transcriptUrl(date) {
+  const p = new URLSearchParams({ t: token || "", date });
+  return "/api/logs/serial?" + p.toString();
+}
 
 export function eventsUrl(lastId) {
   const p = new URLSearchParams({ t: token || "" });
