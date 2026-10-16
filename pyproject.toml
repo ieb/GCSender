@@ -1,0 +1,31 @@
+[project]
+name = "gcsender"
+version = "0.1.0"
+description = "Candle-style G-code sender for GRBL 0.9/1.1: local HTTP server + browser SPA"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pyserial>=3.5",
+]
+
+[project.scripts]
+gcsender = "gcsender.__main__:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+]
+
+[build-system]
+requires = ["uv_build>=0.8,<0.14"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-root = "server"
+
+[tool.uv]
+no-build = true
+exclude-newer = "7 days"
+
+[tool.pytest.ini_options]
+testpaths = ["server/tests"]

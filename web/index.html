@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="gcs-token" content="">
+  <title>GCSender</title>
+  <link rel="stylesheet" href="css/app.css">
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">GCSender</div>
+    <div class="conn" id="conn">
+      <select id="conn-port" title="Serial port"></select>
+      <button id="conn-refresh" type="button" title="Refresh ports">⟳</button>
+      <select id="conn-baud" title="Baud rate">
+        <option>9600</option><option>19200</option><option>38400</option><option>57600</option>
+        <option selected>115200</option><option>230400</option>
+      </select>
+      <button id="conn-toggle" type="button" class="primary">Connect</button>
+      <span id="conn-info" class="muted"></span>
+    </div>
+    <div class="link" id="link" title="Server link"><span class="dot"></span><span id="link-text">offline</span></div>
+  </header>
+
+  <div id="banner" class="banner" hidden></div>
+
+  <main class="layout">
+    <section class="col-left">
+      <section class="panel" id="panel-state">
+        <h2>State</h2>
+        <div class="state-row">
+          <span id="machine-state" class="state-badge">—</span>
+          <span id="machine-firmware" class="muted"></span>
+        </div>
+        <table class="coords">
+          <thead><tr><th></th><th>Work</th><th>Machine</th></tr></thead>
+          <tbody>
+            <tr><th>X</th><td id="wpos-x">—</td><td id="mpos-x">—</td></tr>
+            <tr><th>Y</th><td id="wpos-y">—</td><td id="mpos-y">—</td></tr>
+            <tr><th>Z</th><td id="wpos-z">—</td><td id="mpos-z">—</td></tr>
+          </tbody>
+        </table>
+        <div id="machine-extra" class="muted small"></div>
+        <div id="machine-modal" class="mono small"></div>
+        <div id="machine-alarm" class="alarm" hidden></div>
+      </section>
+
+      <section class="panel" id="panel-control">
+        <h2>Control</h2>
+        <div class="buttons">
+          <button type="button" data-rt="hold" title="Feed hold (!)">Hold</button>
+          <button type="button" data-rt="resume" title="Cycle start / resume (~)">Resume</button>
+          <button type="button" data-rt="reset" class="danger" title="Soft reset (Ctrl-X)">Reset</button>
+          <button type="button" data-cmd="$X" title="Kill alarm lock ($X)">Unlock</button>
+          <button type="button" data-cmd="$H" id="btn-home" title="Homing cycle ($H)">Home</button>
+          <button type="button" data-cmd="$G" title="Parser state ($G)">$G</button>
+          <button type="button" data-cmd="$#" title="Offsets ($#)">$#</button>
+          <button type="button" data-cmd="$$" title="Settings ($$)">$$</button>
+        </div>
+      </section>
+    </section>
+
+    <section class="col-main">
+      <section class="panel grow" id="panel-visualizer">
+        <h2>Visualizer</h2>
+        <div class="placeholder muted">3D view arrives in phase 2.</div>
+      </section>
+      <section class="panel" id="panel-console">
+        <h2>Console <button type="button" id="console-clear" class="link-button">clear</button></h2>
+        <div id="console-out" class="console-out mono" role="log" aria-live="polite"></div>
+        <form id="console-form" class="console-form" autocomplete="off">
+          <input id="console-input" class="mono" placeholder="Command, e.g. $$ or G0 X10" spellcheck="false">
+          <button type="submit">Send</button>
+        </form>
+      </section>
+    </section>
+  </main>
+</body>
+</html>
