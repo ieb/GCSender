@@ -207,7 +207,7 @@ Legend:
 |---|---|---|---|
 | Collapsible/resizable panels; layout lock | ✅ | Drag-to-rearrange: Later | P6 |
 | Settings (groups, defaults, profiles, import/export); shortcuts editor | ✅ | Machine and sender settings on the server; UI preferences in `localStorage` | P6 |
-| User commands panel | ✅ | Buttons → G-code plus a small macro language (`{wx}`, `{prbz}`, `wait idle`), run by the server | P5 |
+| User commands panel | ✅ | Buttons → G-code plus a small macro language (`{wx}`, `{prbz}`, `{max(safez, wz + 2)}`, `wait idle`), run by the server. Expressions are parsed with a whitelist (numbers, `+ - * /`, `min max abs`, named variables), never `eval`. A line using a position waits for Idle first; an error or Stop ends the macro. Stored in `<state>/macros.json` | P5 ✅ |
 | Script window (arbitrary JS) / plugins | ❌ | Covered by macros | ✗ |
 | Camera with reticle | ✅ | `getUserMedia` in the SPA | Later |
 | Theme (light/dark), help page | ✅ | | P6 |
@@ -328,7 +328,8 @@ web/                    served as the SPA
 ### 5.7 Persistence (state dir, default `~/.gcsender/`)
 - `settings.json`: machine, sender, jog, probe and user-command settings.
 - `jobs/<id>.nc` plus metadata, and `maps/<name>.map`.
-- `journal.json`: active job, variant, sent/acked line, modal/WCS/G92, spindle. Written every ~1 s and on state changes, via an atomic file replace.
+- `journal.json`: active job, variant digest, sent/acked/executing line, `reserved` (the journal is written *before* streaming past it, 64 lines ahead, so the last line sent is always ≤ `reserved`), last MPos/WPos, offsets and modal state. Written every ~1 s, on state changes and ahead of streaming, via a temp file, fsync and an atomic replace. Removed when a job ends (done/stopped/failed); kept while `interrupted`.
+- `macros.json`: user commands.
 - `logs/serial-YYYYMMDD.log`: raw transcript.
 
 ---
@@ -378,9 +379,11 @@ GET  /api/job                  state       GET /api/job/text (active variant, ex
 POST /api/job/select           {jobId}     POST /api/job/unload     POST /api/job/heightmap {enabled}
 POST /api/job/start            {fromLine?}  POST /api/job/pause|resume|stop  (resume = Continue after an error or tool change)
 POST /api/job/override         {kind: feed|rapid|spindle, value: %}
+POST /api/job/recover          {action: seamless|entry|discard, line?, rezeroed?}
+GET/PUT /api/macros            {macros: [{id, name, text}]}       POST /api/macros/{id}/run
+POST /api/sim/restart-server   (--simulate only) emulate a server crash + restart; the simulator keeps running
 GET/PUT /api/grbl/settings     $$ parsed / {id: value}
 GET/PUT /api/settings          app (server-side) settings
-GET/PUT /api/macros            user commands      POST /api/macros/{id}/run
 GET  /api/logs/serial          transcript download
 ```
 
@@ -419,8 +422,8 @@ GET  /api/logs/serial          transcript download
 |---|---|---|
 | SPA reload / tab closed / browser crash | Job, probe run and console session continue on the server. A jog step in progress simply completes (it is a bounded move) | On load: `GET /api/state` + SSE with `Last-Event-ID`, giving the identical view. Fully automatic |
 | Network blip (LAN tablet) | Same as above | EventSource auto-reconnects and replays |
-| Server process crash or restart | Streaming stops; GRBL finishes its buffer. Reopening the port **resets the board** (DTR) unless auto-reset is disabled. pyserial `dtr=False` before open is attempted; it may or may not help on the CH340 and must be verified | The journal is read at start-up. **No banner** (no-reset board): re-attach and offer seamless resume from `sent+1`. **Banner**: guided re-zero (WCS from EEPROM; Z re-probe at the map origin), then send from line N with parser-state restore |
-| Host reboot / USB unplug | As above, plus position lost | Same guided path |
+| Server process crash or restart | Streaming stops; GRBL finishes its buffer. Reopening the port **resets the board** (DTR) unless auto-reset is disabled. pyserial `dtr=False` before open is attempted; it may or may not help on the CH340 and must be verified | The journal is read at start-up and the job comes back as `interrupted` with a recovery card. **No banner** (re-attached): wait for Idle, then match the machine's work position to a line end between the last acknowledged line and the journal's `reserved` line (earliest match, so at worst a short stretch is re-cut, never skipped). Offer **Resume here** (seamless: modal state restored, spindle re-started with a dwell only if it stopped, no motion) or a safe-entry resume. **Banner** (reset): position and parser state are lost. Guided re-zero (XY reference; Z probe, at the map origin with a heightmap), confirmed by two checkboxes, then a safe-entry resume from the line that was executing at the last journal write (≤ 1 s stale, so it errs towards re-cutting) |
+| Host reboot / USB unplug | As above, plus position lost | Same guided path. A lost link inside a running server (unplug, Disconnect) interrupts the job in the same way and recovers when the port is reopened |
 
 ---
 
@@ -433,7 +436,7 @@ GET  /api/logs/serial          transcript download
 | **P2 Jog, WCS, spindle, 3D** ✅ (simulator) | Step-only jog (no continuous mode), keyboard map, hard stop, WCS select/zero, G92, go-to, spindle/coolant, WebGL view with live tool and camera controls | Each step moves exactly its size, for every default size; a held key or button is one step; deliberate presses queue and sum exactly; a step that would leave the jog box (checked at the end of the queue) or that would follow non-jog motion is refused; Esc stop gives no alarm and keeps offsets. Verified on the 0.9j/1.1f simulators (tests in `test_phase2.py`). **Hardware check deferred** |
 | **P3 Probe & heightmap** ✅ (simulator) | Z probe (single/two-stage), probe test, heightmap create/auto/probe/edit/library, `.map` v3 I/O, bicubic, server transform + cache, SPA surface render, transformed-program fetch | A 5×4 map on the machine; `.map` interop with Candle; a reload mid-probe continues; the transformed job's Z verified on a test PCB. Simulator: a 5×4 map matches the simulated warped surface within 2 µm; a reload mid-run continues (browser-verified); `.map` files in Candle's layout read and write; transform verified by an independent interpreter (lines, arcs, G91, G20, G92). **Hardware check deferred**, and `.map` interop to be confirmed with a file saved by Candle itself |
 | **P4 Jobs & streaming** ✅ (simulator) | Upload/library, server parser + estimator, streamer job runner, pause/stop/from-line with restore, start/end commands, M6 flow, overrides, SPA program table + progress colouring + markers + bounds + ETA | A 50k-line job streams without stalls; a reload mid-job shows correct progress; ETA within ±15 %. Simulator: 50,004 lines streamed at ~670 lines/s with the planner full at real-time speed; a reload mid-job shows the same line, colours and ETA (browser-verified); ETA within ±15 % of the simulated run with the estimator given the simulator's constant-speed model (tests in `test_phase4.py`). **Hardware check deferred**: the ±15 % ETA on the real machine (acceleration, junctions) |
-| **P5 Recovery & user commands** | Journal, start-up recovery (re-attach and post-reset paths), macros panel and engine, notifications | Killing and restarting the server mid-job on the simulator (reset and no-reset modes) recovers as specified |
+| **P5 Recovery & user commands** ✅ (simulator) | Journal, start-up recovery (re-attach and post-reset paths), macros panel and engine, notifications | Killing and restarting the server mid-job on the simulator (reset and no-reset modes) recovers as specified. Simulator: no-reset restart matched the stop position to the exact line end and resumed seamlessly with every line sent (browser-verified, transcript checked); reset restart required the re-zero confirmation and resumed with a safe entry; lost link inside the server; missing job file; discard (tests in `test_phase5.py`). Notifications: desktop notification + tab title while the tab is hidden. **Hardware check deferred** |
 | **P6 Polish** | Settings UI and profiles, shortcuts editor, layout (collapse/resize), visual settings, theme, help, door command | Usable on desktop and tablet widths |
 | **Later** | Line editing/undo, camera, orient/align, transform G-code, canned cycles, centre finder, TLO re-probe on M6, laser view, S-rewrite override on 0.9, re-probe selected points | — |
 
@@ -456,6 +459,7 @@ GET  /api/logs/serial          transcript download
   - Does Hold → Reset leave the position intact with no alarm on the real 0.9j?
   - P3: probe input test open/touching (does the 0.9j board alarm on an already-triggered probe and clear with `$X`?); Z probe with and without a plate against a known height; a 5×4 map on a PCB blank; load the `.map` in Candle and a Candle `.map` here; cut a shallow test isolation pattern with the compensated file.
   - P4: air-cut a job of a few thousand short segments: no stutter (planner starvation) at 115200 baud; ETA against the actual time (±15 %); Pause/Resume and Stop mid-move (no alarm, position kept); an M6 pause, jog, Continue; start from a mid-program line (air) and check the entry moves; 0.9 software feed override takes effect after the buffered moves.
+  - P5: air-cut, then kill the server (`kill -9`) mid-job and start it again: does the CH340 board reset on open even with `dtr=False`? Without a reset, is the matched line right and is the seamless resume clean? With a reset, follow the re-zero steps and resume (air). Unplug USB mid-job and replug. Run each default macro.
   - P2: measure 0.01/0.1/1/10 mm steps with a dial indicator (also checks `$100–$102`); a held key or mouse button moves one step only; five quick presses move exactly five steps; Esc mid-move (no alarm, offsets kept, position unchanged against a reference mark); `G10 L20` zeroing; go-to with safe Z; `M3 S…` speed scaling against `spindleMax` (0.9j build default 1000); keyboard jog in Chrome/Safari/Firefox.
 - **DTR reset on server (re)start:** inherent to the CH340 + 328P board. It only matters if the server restarts mid-job; disabling auto-reset (a 10 µF cap RESET–GND) makes that case seamless too. Both paths are supported.
 - **Software feed-override lag** on 0.9 is documented in the UI; it is not a safety control. Continuous jogging, the other overrun risk, is excluded by design (§5.4). The hardware E-stop remains the real stop.

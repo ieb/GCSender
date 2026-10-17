@@ -33,6 +33,7 @@ from ..errors import ControllerError
 from ..streamer import StreamerError
 from .analyze import Scanner, state_before
 from .estimate import Machine
+from .journal import Journal
 from .library import M6_RE, JobError, JobLibrary, Variant
 
 log = logging.getLogger(__name__)
@@ -40,6 +41,10 @@ log = logging.getLogger(__name__)
 PUBLISH_INTERVAL = 0.1
 F_WORD = re.compile(r"F[-+]?(?:\d+\.?\d*|\.\d+)")
 ACTIVE = ("running", "paused", "error", "toolchange", "starting")
+FINAL = ("done", "stopped", "failed")
+RESERVE = 64  # lines journaled ahead of streaming (bounds the crash uncertainty)
+POS_TOL = 0.01  # mm: machine position vs. a line's end point when re-attaching
+LINK_LOST = ("disconnected", "connection lost", "controller reset", "not connected")
 
 
 def _f(v: float, mm: bool = True) -> str:
@@ -52,8 +57,13 @@ class Stopped(Exception):
 
 
 class JobRunner:
-    def __init__(self, controller: Any, maps: Any, library: JobLibrary):
+    def __init__(self, controller: Any, maps: Any, library: JobLibrary, journal: Journal | None = None):
         self.ctl = controller
+        self.journal = journal
+        self.recovery: dict[str, Any] | None = None
+        self._reserved = -1
+        self._last_journal = 0.0
+        self._dead = False
         self.maps = maps
         self.library = library
         self._lock = threading.RLock()
@@ -62,7 +72,8 @@ class JobRunner:
         self.original: Variant | None = None
         self.transformed: Variant | None = None
         self.use_heightmap = False
-        self.state = "idle"  # idle | ready | starting | running | paused | error | toolchange | done | stopped | failed
+        # idle | ready | starting | running | paused | error | toolchange | done | stopped | failed | interrupted
+        self.state = "idle"
         self.message: str | None = None
         self.start_line = 0
         self.sent = -1  # highest line index sent (or skipped)
@@ -92,6 +103,8 @@ class JobRunner:
         controller.stop_hooks.append(self._on_stop_hook)
         controller.job_runner = self
         self._publish(force=True)
+        if journal is not None:
+            self._load_journal()
 
     # ---------------------------------------------------------------- state
 
@@ -161,6 +174,7 @@ class JobRunner:
             },
             "state": self.state,
             "message": self.message,
+            "recovery": self.recovery,
             "startLine": self.start_line,
             "sent": self.sent,
             "acked": self.acked,
@@ -176,17 +190,65 @@ class JobRunner:
             **self._eta(),
         }
 
+    def abandon(self) -> None:
+        """Simulated process death: never write or publish again."""
+        self._dead = True
+        self.journal = None
+
     def _publish(self, force: bool = False) -> None:
+        if self._dead:
+            return
         now = time.monotonic()
         if not force and now - self._last_pub < PUBLISH_INTERVAL:
             return
         self._last_pub = now
         self.ctl.bus.publish("job", self.snapshot(), retain=True)
+        self._journal()
 
     def _set(self, state: str, message: str | None = None) -> None:
         self.state = state
         self.message = message
+        if state in FINAL and self.journal is not None:
+            self.journal.clear()
+        self._journal(force=True)
         self._publish(force=True)
+
+    # ------------------------------------------------------------- journal
+
+    def _journal_data(self) -> dict[str, Any]:
+        v = self.variant
+        st = self.ctl.model.status or {}
+        return {
+            "active": True,
+            "jobId": (self.meta or {}).get("id"),
+            "name": (self.meta or {}).get("name"),
+            "heightmap": self.use_heightmap,
+            "variantDigest": v.digest if v else None,
+            "state": self.state,
+            "startLine": self.start_line,
+            "acked": self.acked,
+            "sent": self.sent,
+            "executing": self.executing(),
+            "reserved": max(self._reserved, self.sent),
+            "startedAt": self.started_at,
+            "updated": time.time(),
+            "wpos": st.get("wpos"),
+            "mpos": st.get("mpos"),
+            "offsets": {k: v for k, v in self.ctl.model.offsets.items() if k != "PRB"},
+            "modal": self.ctl.model.modal,
+            "firmware": self.ctl.connection.get("firmware"),
+        }
+
+    def _journal(self, force: bool = False) -> None:
+        if self.journal is None or not (self.active or self.state == "interrupted"):
+            return
+        now = time.monotonic()
+        if not force and now - self._last_journal < 1.0:
+            return
+        self._last_journal = now
+        if self.state == "interrupted" and self.recovery is not None:
+            return  # keep what was recorded at the interruption
+        self.journal.write(self._journal_data())
 
     # ------------------------------------------------------------- loading
 
@@ -196,10 +258,15 @@ class JobRunner:
     def _max_line(self) -> int:
         return int((self.ctl.caps or {}).get("lineLength", 80)) - 1
 
+    def _no_recovery(self) -> None:
+        if self.state == "interrupted":
+            raise ControllerError("an interrupted job is waiting: resume or discard it first")
+
     def select(self, job_id: str) -> dict[str, Any]:
         with self._lock:
             if self.active:
                 raise ControllerError("a job is running")
+            self._no_recovery()
             meta, text = self.library.get(job_id)
             self.meta = meta
             self.original = Variant.build("original", text, self._machine(), self._max_line())
@@ -214,6 +281,7 @@ class JobRunner:
         with self._lock:
             if self.active:
                 raise ControllerError("a job is running")
+            self._no_recovery()
             self.meta = self.original = self.transformed = None
             self._reset_progress()
             self._set("idle")
@@ -248,6 +316,7 @@ class JobRunner:
         with self._lock:
             if self.active:
                 raise ControllerError("a job is running")
+            self._no_recovery()
             if enabled and self.original is not None:
                 self._build_transformed()
             self.use_heightmap = enabled
@@ -265,10 +334,12 @@ class JobRunner:
 
     # ------------------------------------------------------------- control
 
-    def start(self, from_line: int = 0) -> dict[str, Any]:
+    def start(self, from_line: int = 0, *, seamless: bool = False, _recover: bool = False) -> dict[str, Any]:
         with self._lock:
             if self.active:
                 raise ControllerError("a job is already running")
+            if not _recover:
+                self._no_recovery()
             if self.original is None:
                 raise ControllerError("no job loaded")
             if self.ctl.connection.get("state") != "connected":
@@ -288,7 +359,9 @@ class JobRunner:
                 raise ControllerError("start line out of range", 400)
             entry: list[str] = []
             sc = Scanner()
-            if from_line > 0:
+            if seamless:
+                entry = self._seamless_lines(v, from_line)
+            elif from_line > 0:
                 entry = self._entry_lines(v, from_line)
             self._scanner = sc
             for i in range(from_line):
@@ -299,6 +372,7 @@ class JobRunner:
             self.sent = self.acked = from_line - 1
             self._stop = False
             self._stop_line = None
+            self._reserved = -1
             self._continue.clear()
             self.started_at = time.time()
             self.ctl.busy = "job"
@@ -326,6 +400,8 @@ class JobRunner:
                 self._hold_t = None
             self._set("running")
         elif self.state in ("error", "toolchange"):
+            if self.state == "toolchange" and self.ctl.busy:
+                raise ControllerError(f"wait for the {self.ctl.busy} to finish first")
             self._continue.set()
         elif self.state == "running" and self.ctl.machine_state in ("Hold", "Door"):
             self.ctl.realtime("resume")  # M0/M1 program pause, door, or a hold from elsewhere
@@ -454,6 +530,10 @@ class JobRunner:
                     self._tool_change(i, cmd, inflight)
                     continue
                 cmd = self._apply_override(cmd)
+                if i > self._reserved:
+                    # Journal ahead: after a crash, the last line sent is <= reserved.
+                    self._reserved = i + RESERVE
+                    self._journal(force=True)
                 try:
                     p = streamer.send(cmd, "job", timeout=600)
                 except StreamerError as e:
@@ -484,6 +564,8 @@ class JobRunner:
             self.finished_at = time.time()
             if self._stop:
                 self._set("stopped", f"stopped at line {self._stop_line or self.acked + 2}")
+            elif self._link_lost(str(e)):
+                self._interrupt(f"interrupted: {e}", {**self._journal_data(), "reserved": self.sent})
             else:
                 self._set("failed", str(e))
         except Exception as e:  # pragma: no cover - defensive
@@ -496,13 +578,16 @@ class JobRunner:
             self.ctl._schedule_modal_refresh()
             self._publish(force=True)
 
+    def _link_lost(self, msg: str) -> bool:
+        return self.ctl.connection.get("state") != "connected" or any(k in msg for k in LINK_LOST)
+
     def _check_stop(self) -> None:
         if self._stop:
             raise Stopped()
-        if self.ctl.machine_state == "Alarm":
-            raise ControllerError("ALARM: the job was stopped")
         if self.ctl.connection.get("state") != "connected":
             raise ControllerError("connection lost")
+        if self.ctl.machine_state == "Alarm":
+            raise ControllerError("ALARM: the job was stopped")
 
     def _collect(self, inflight: list[tuple[int, Any]], wait: float = 0.0) -> None:
         """Pop completed lines from the front, in order."""
@@ -559,7 +644,11 @@ class JobRunner:
             self._check_stop()
             self._publish()
             st = self.ctl.wait_status(lambda s: True, timeout=1.0)
-            if st is not None and st["state"] == "Idle" and not self.ctl._streamer.inflight:
+            streamer = self.ctl._streamer
+            if streamer is None:
+                raise ControllerError("connection lost")
+            if st is not None and st["state"] == "Idle" and not streamer.inflight:
+                self._check_stop()  # Idle because a Stop just reset the machine?
                 self._timeline.clear()
                 self._exec = self.acked
                 return
@@ -627,3 +716,216 @@ class JobRunner:
         if is_feed_move:
             self._ov_force_f = False
         return out
+
+    # ------------------------------------------------------------ recovery
+
+    def _load_journal(self) -> None:
+        """At start-up: a journal marked active means the server died mid-job."""
+        assert self.journal is not None
+        data = self.journal.read()
+        if not data or not data.get("active"):
+            return
+        log.warning("job journal: %s was %s when the server stopped", data.get("name"), data.get("state"))
+        error = None
+        try:
+            meta, text = self.library.get(str(data.get("jobId")))
+            self.meta = meta
+            self.original = Variant.build("original", text, self._machine(), self._max_line())
+            self.use_heightmap = bool(data.get("heightmap"))
+            if self.use_heightmap:
+                self._build_transformed()
+            if self.variant is None or self.variant.digest != data.get("variantDigest"):
+                error = "the program or heightmap has changed since, so line numbers no longer match"
+        except (JobError, ControllerError) as e:
+            error = f"cannot reload the job: {e}"
+            self.meta = self.meta or {"id": data.get("jobId"), "name": data.get("name")}
+        self.start_line = int(data.get("startLine") or 0)
+        self.acked = int(data.get("acked", -1))
+        self.sent = int(data.get("sent", -1))
+        self._exec = int(data.get("executing", self.acked))
+        self.started_at = data.get("startedAt")
+        self._interrupt(f"the server stopped while the job was {data.get('state')}", data, error=error, write=False)
+
+    def _interrupt(self, reason: str, data: dict[str, Any], *, error: str | None = None, write: bool = True) -> None:
+        jr = {k: data.get(k) for k in ("acked", "sent", "executing", "reserved", "startLine", "updated", "wpos", "mpos", "state")}
+        if write and self.journal is not None:
+            # Journal first: once the state reads "interrupted", the file says so too.
+            self.journal.write({**data, "active": True, "state": "interrupted"})
+        self.recovery = {
+            "reason": reason,
+            "error": error,
+            "mode": None,  # attached | reset
+            "phase": "waiting for the controller connection",
+            "journal": jr,
+            "seamlessLine": None,
+            "suggestedLine": None,
+            "matched": None,
+            "note": None,
+        }
+        self.state = "interrupted"
+        self.message = reason
+        self.toolchange = None
+        self.held_error = None
+        self._publish(force=True)
+        if error is None:
+            threading.Thread(target=self._watch_recovery, name="job-recovery", daemon=True).start()
+
+    def _watch_recovery(self) -> None:
+        key = None
+        while self.state == "interrupted" and self.recovery is not None and not self._dead:
+            rec = self.recovery
+            conn = self.ctl.connection
+            if conn.get("state") != "connected" or not self.ctl.caps:
+                new = ("offline",)
+                if new != key:
+                    key = new
+                    rec.update(mode=None, phase="waiting for the controller connection", seamlessLine=None, suggestedLine=None)
+                    self._publish(force=True)
+                time.sleep(0.2)
+                continue
+            mode = "attached" if conn.get("session") == "attached" else "reset"
+            state = self.ctl.machine_state
+            if mode == "attached" and state != "Idle":
+                new = (mode, "wait", state)
+                if new != key:
+                    key = new
+                    hint = {
+                        "Run": "the machine is finishing the lines it had buffered",
+                        "Hold": "the machine is in feed hold: Resume to let it finish its buffer, or Reset",
+                        "Alarm": "the machine is in alarm: unlock it",
+                    }.get(str(state), f"waiting for Idle (machine is {state})")
+                    rec.update(mode=mode, phase=hint, seamlessLine=None, suggestedLine=None)
+                    self._publish(force=True)
+                time.sleep(0.2)
+                continue
+            wpos = (self.ctl.model.status or {}).get("wpos")
+            new = (mode, "ready", tuple(round(c, 3) for c in wpos) if (mode == "attached" and wpos) else None)
+            if new != key:
+                key = new
+                self._assess(rec, mode, wpos)
+                self._publish(force=True)
+            time.sleep(0.3)
+
+    def _assess(self, rec: dict[str, Any], mode: str, wpos: list[float] | None) -> None:
+        v = self.variant
+        assert v is not None
+        jr = rec["journal"]
+        n = len(v.cmds)
+        start = int(jr.get("startLine") or 0)
+        executing = int(jr.get("executing") if jr.get("executing") is not None else jr.get("acked", -1))
+        suggested = min(n - 1, max(start, executing + 1))
+        rec.update(mode=mode, phase="ready", suggestedLine=suggested, seamlessLine=None, matched=None, note=None)
+        if mode == "reset":
+            rec["note"] = (
+                "The controller was reset: the machine position was lost and the parser state cleared. "
+                "Re-establish work zero (XY reference, Z probe; with a heightmap, probe Z at the map origin) "
+                "before resuming with a safe entry."
+            )
+            return
+        if wpos is None:
+            rec["note"] = "no machine position yet"
+            return
+        lo = max(start - 1, int(jr.get("acked", -1)), 0)
+        hi = min(n - 1, int(jr.get("reserved") if jr.get("reserved") is not None else jr.get("sent", lo)))
+        sc = Scanner()
+        candidates: list[int] = []
+        for i in range(hi + 1):
+            for _ in sc.feed_line(i, v.cmds[i]):
+                pass
+            if i >= lo:
+                pos = sc.m.st.pos
+                if all(p is not None for p in pos) and all(abs(p - w) <= POS_TOL for p, w in zip(pos, wpos)):  # type: ignore[operator]
+                    candidates.append(i)
+        if sc.m.g92_used:
+            rec["note"] = "the program uses G92, so the position cannot be matched: resume with a safe entry"
+            return
+        if not candidates:
+            rec["note"] = (
+                f"the machine position matches no line end between lines {lo + 1} and {hi + 1}: "
+                "resume with a safe entry from the suggested line"
+            )
+            return
+        k = candidates[0]  # the earliest match: at worst a short stretch is re-cut, never skipped
+        if k + 1 >= n:
+            rec["note"] = "the job had reached its last line"
+            rec["suggestedLine"] = n - 1
+            return
+        rec.update(seamlessLine=k + 1, suggestedLine=k + 1, matched=k)
+        others = [c + 1 for c in candidates[1:] if sc.m.st.pos is not None][:5]
+        rec["note"] = (
+            f"the machine is at the end of line {k + 1}"
+            + (f" (also the end of lines {', '.join(map(str, others))})" if others else "")
+        )
+
+    def _seamless_lines(self, v: Variant, n: int) -> list[str]:
+        """Re-attached, machine stopped at the end of line n-1: restore modal state only."""
+        s = state_before(v.cmds, n)
+        mode = f"{s['units']}{s['distance']}{s['plane']}{s['wcs']}"
+        if s["motion"] in ("G0", "G1", "G2", "G3"):
+            mode += s["motion"]
+        if s["feed"]:
+            mode += "F" + _f(s["feed"], s["units"] == "G21")
+        lines = [mode]
+        modal = self.ctl.model.modal or {}
+        if s["spindle"] in ("M3", "M4"):
+            lines.append(f"{s['spindle']}S{_f(s['speed'])}")
+            dwell = float(self.ctl.settings.get("spindleDwell"))
+            if modal.get("spindle") != s["spindle"] and dwell > 0:
+                lines.append(f"G4P{_f(dwell)}")
+        elif modal.get("spindle") in ("M3", "M4"):
+            lines.append("M5")
+        lines += sorted(s["coolant"], reverse=True) or (["M9"] if modal.get("coolant") else [])
+        return lines
+
+    def recover(self, action: str, line: int | None = None, rezeroed: bool = False) -> dict[str, Any]:
+        with self._lock:
+            rec = self.recovery
+            if self.state != "interrupted" or rec is None:
+                raise ControllerError("there is no interrupted job")
+            if action == "discard":
+                self.recovery = None
+                if self.journal is not None:
+                    self.journal.clear()
+                if self.original is not None and not rec.get("error"):
+                    self._reset_progress()
+                    self._set("ready", "the interrupted job was discarded")
+                else:
+                    self.meta = self.original = self.transformed = None
+                    self._reset_progress()
+                    self._set("idle")
+                return self.snapshot()
+            if rec.get("error"):
+                raise ControllerError(rec["error"])
+            if rec.get("phase") != "ready":
+                raise ControllerError(f"not ready to resume: {rec.get('phase')}")
+            if action == "seamless":
+                if rec.get("mode") != "attached" or rec.get("seamlessLine") is None:
+                    raise ControllerError("a seamless resume needs a re-attached controller at a matched line end")
+                wpos = (self.ctl.model.status or {}).get("wpos")
+                k = rec["matched"]
+                sc = Scanner()
+                v = self.variant
+                assert v is not None
+                for i in range(k + 1):
+                    for _ in sc.feed_line(i, v.cmds[i]):
+                        pass
+                if not wpos or any(abs(p - w) > POS_TOL for p, w in zip(sc.m.st.pos, wpos)):  # type: ignore[operator]
+                    raise ControllerError("the machine has moved since: resume with a safe entry instead")
+                target, seamless = rec["seamlessLine"], True
+            elif action == "entry":
+                if rec.get("mode") == "reset" and not rezeroed:
+                    raise ControllerError("confirm that work zero has been re-established first")
+                target = rec["suggestedLine"] if line is None else line
+                seamless = False
+            else:
+                raise ControllerError("action must be seamless, entry or discard", 400)
+            self.recovery = None
+            self.state = "ready"
+            try:
+                return self.start(int(target), seamless=seamless, _recover=True)
+            except ControllerError:
+                self.recovery = rec
+                self.state = "interrupted"
+                self._publish(force=True)
+                threading.Thread(target=self._watch_recovery, name="job-recovery", daemon=True).start()
+                raise

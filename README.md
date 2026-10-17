@@ -6,7 +6,7 @@ over HTTP and server-sent events, so reloading or closing the page never interru
 
 See [docs/PLAN.md](docs/PLAN.md) for the full plan, feature inventory and phases.
 
-**Status:** phases 0–4 are complete, verified on the simulator only; the hardware check is still deferred.
+**Status:** phases 0–5 are complete, verified on the simulator only; the hardware check is still deferred.
 - Working: connection and firmware detection (fresh boot or re-attach), live status, and the console with error help.
 - Control: Hold, Resume, Reset (with offset and parser-state restore), Unlock and Check.
 - Jogging: step only. Each click or key press moves exactly 0.01, 0.05, 0.1, 0.5, 1, 5 or 10 mm. A long press is always one step (no auto-repeat), and there is no hold-to-move mode. Keys are remappable and Esc stops. There is an optional jog box.
@@ -14,11 +14,14 @@ See [docs/PLAN.md](docs/PLAN.md) for the full plan, feature inventory and phases
 - Probing: Z probe (plate, two-stage), probe-input test for GRBL 0.9.
 - Heightmaps: probe a grid, edit values, save/load a library, import/export Candle `.map` files, and compensate a G-code file on the server (download and 3D preview).
 - Jobs: upload (button or drag-drop) to a server-side library, then Start / Pause / Stop, start from any line (safe entry), M6 tool-change pause (jog and probe allowed), error hold with Continue/Stop, start/end commands, and feed override (software on 0.9, real-time feed/rapid/spindle on 1.1). The server streams the job, so a page reload shows the job exactly where it is. Run the heightmap-compensated version with one checkbox.
+- Recovery: a journal lets a restarted server (or a reconnect after a lost USB link) resume an interrupted job: seamlessly when the board was not reset, or after a guided re-zero with a safe entry when it was.
+- User commands: buttons for server-run macros with `{wx}`/`{prbz}`-style values, simple arithmetic and `wait idle`.
+- Notifications: desktop notifications and a marked tab title when a job finishes or needs you while the tab is in the background (🔔 in the top bar).
 - 3D view: grid, axes, tool and trail, the program (feed, rapids, plunges) coloured by progress, start/end markers and the selected line, the heightmap surface, and the compensated path, with orbit/pan/zoom and preset views.
 - Settings: GRBL `$$` editor with warnings for `$10`/`$13`, and app settings.
 - Logs: application log and serial transcripts.
 
-Next: phase 5 (journal and recovery after a *server* restart mid-job, user commands/macros).
+Next: phase 6 (polish: settings profiles, shortcut editor, layout, theme, help).
 
 **Jogging is step only, by design.** Continuous (hold-to-move) jogging is deliberately not provided: GRBL 0.9 cannot cancel a jog,
 so any overrun would go into the workpiece. Separate presses queue and run in order; holding a key or button never produces more than one step.
@@ -70,6 +73,21 @@ A quick tour: *5 mm above surface* → *Probe Z* → set a map border → *Probe
 5. **On an M6** the job waits for the machine to stop, runs the *tool-change commands* (default `M5`), and asks. You can jog and probe Z, then **Continue**. **On an error** the machine is feed-held and you choose Continue or Stop. Both are set in *Settings → Application → Jobs*.
 
 The simulator moves at constant speed (no acceleration), so its run times are shorter than the estimate. The ETA on the real machine is a deferred hardware check.
+
+### If the server stops mid-job
+The server keeps a journal (`<state-dir>/journal.json`). When it starts again (or the USB link comes back) the job shows as **interrupted** with a recovery card:
+- **The board was not reset** (it re-attached): the machine finishes the moves it had buffered. The server then finds the line whose end matches where the machine stopped and offers **Resume here**, which continues with no extra moves.
+- **The board was reset** (the usual case when the port reopens on a CH340 board): the position is lost. Re-establish work zero (XY reference, Probe Z; with a heightmap, at the map origin), tick the two boxes, then **Resume with safe entry** from the suggested line (or any line).
+- **Discard** forgets the interrupted run; the program stays loaded.
+
+In simulate mode, **Simulate server restart** (Probe & heightmap tab) tries this without killing anything. Start with `--sim-no-reset` to see the re-attach path.
+
+### User commands
+*Machine* tab → **User commands** → *edit*. Each command is G-code, one line per row. `{expr}` inserts a value:
+- **Variables:** `wx wy wz` (work position), `mx my mz` (machine position), `prbx prby prbz` (last probe contact) and `safez`.
+- **Arithmetic:** `+ - * /` and `min max abs`, e.g. `G0 Z{max(safez, wz + 2)}`.
+
+`wait idle` waits for the moves to finish. Esc / Stop aborts a running command.
 | `--state-dir DIR` | Settings and serial transcripts (default `~/.gcsender`) |
 
 ## Security

@@ -382,3 +382,13 @@ def test_start_from_line_raises_when_the_program_uses_another_wcs(rig):
     assert finished(jobs) == "done"
     out = [e["line"] for e in ctl.bus.snapshot()["console"] if e.get("src") == "job" and e.get("dir") == "tx"]
     assert out[:2] == ["G21G90G17G55", "G0Z5"]  # ...but the program is in G55: raise anyway
+
+
+def test_stop_while_the_last_moves_run_is_stopped_not_done(rig):
+    sim, ctl, _maps, jobs = rig("0.9j", time_scale=1.0)
+    load(jobs, "G21 G90\nG0 X0 Y0 Z0\nG1 X20 F300\n")
+    jobs.start()
+    # Everything is sent and acknowledged; the runner waits for the move to finish.
+    wait_for(lambda: jobs.state == "running" and jobs.acked == 2 and sim.pos[0] > 1)
+    jobs.stop()
+    assert finished(jobs) == "stopped"

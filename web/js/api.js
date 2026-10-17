@@ -102,6 +102,11 @@ export const api = {
   jobPause: () => request("POST", "/api/job/pause", {}),
   jobResume: () => request("POST", "/api/job/resume", {}),
   jobStop: () => request("POST", "/api/job/stop", {}),
+  jobRecover: (action, line = null, rezeroed = false) => request("POST", "/api/job/recover", { action, line, rezeroed }),
+  macros: () => request("GET", "/api/macros"),
+  macrosSave: (macros) => request("PUT", "/api/macros", { macros }),
+  macroRun: (id) => request("POST", `/api/macros/${encodeURIComponent(id)}/run`, {}),
+  simRestart: () => request("POST", "/api/sim/restart-server", {}),
   jobOverride: (kind, value) => request("POST", "/api/job/override", { kind, value }),
   async jobText() {
     const res = await fetch("/api/job/text", { headers: { "X-GCS-Token": token || "" }, cache: "no-store" });

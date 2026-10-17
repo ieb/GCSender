@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from typing import Any, Callable
 
 from . import __version__
@@ -13,6 +14,7 @@ from .heightmap.model import MapError
 from .heightmap.service import HeightmapService
 from .jobs.library import MAX_JOB_BYTES, JobError
 from .jobs.runner import JobRunner
+from .macros import MacroError, MacroRunner
 from .probe import Prober
 from .simulator import SURFACE_PRESETS, SurfaceParams
 from .logs import LogRing, Transcript
@@ -36,6 +38,8 @@ def _wrap(fn: Callable[[Request], Any]) -> Callable[[Request], Any]:
             raise ApiError(404 if "no such" in str(e) else 400, str(e)) from None
         except SettingsError as e:
             raise ApiError(400, str(e)) from None
+        except MacroError as e:
+            raise ApiError(404 if "no such" in str(e) else 400, str(e)) from None
 
     return inner
 
@@ -50,7 +54,9 @@ def build_router(
     maps: HeightmapService | None = None,
     prober: Prober | None = None,
     jobs: JobRunner | None = None,
+    macros: MacroRunner | None = None,
     sim: Any = None,
+    sim_restart: Callable[[], None] | None = None,
 ) -> Router:
     r = Router()
 
@@ -369,6 +375,30 @@ def build_router(
     def job_stop(_req: Request) -> Any:
         return _jobs().stop()
 
+    def job_recover(req: Request) -> Any:
+        body = req.json()
+        action = body.get("action")
+        line = body.get("line")
+        if line is not None and (isinstance(line, bool) or not isinstance(line, int)):
+            raise ApiError(400, "line must be a line index")
+        return _jobs().recover(str(action), line, _flag(body, "rezeroed", False))
+
+    # -- user commands (macros) ----------------------------------------------------
+
+    def _macros() -> MacroRunner:
+        if macros is None:
+            raise ApiError(503, "macros unavailable")
+        return macros
+
+    def macros_get(_req: Request) -> Any:
+        return {"macros": _macros().store.list()}
+
+    def macros_put(req: Request) -> Any:
+        return {"macros": _macros().save(req.json().get("macros"))}
+
+    def macros_run(req: Request) -> Any:
+        return _macros().run(req.params["id"])
+
     def job_override(req: Request) -> Any:
         body = req.json()
         kind = body.get("kind", "feed")
@@ -392,6 +422,7 @@ def build_router(
             "surface": surface,
             "presets": sorted(SURFACE_PRESETS),
             "probeForced": s.probe_forced,
+            "canRestart": sim_restart is not None,
         }
 
     def publish_sim() -> dict[str, Any]:
@@ -401,6 +432,12 @@ def build_router(
 
     def sim_get(_req: Request) -> Any:
         return sim_state()
+
+    def sim_restart_server(_req: Request) -> Any:
+        if sim_restart is None:
+            raise ApiError(404, "not available")
+        threading.Thread(target=sim_restart, name="sim-restart", daemon=True).start()
+        return {"ok": True}
 
     def sim_probe(req: Request) -> Any:
         forced = req.json().get("forced")
@@ -529,9 +566,14 @@ def build_router(
     add("POST", "/api/job/resume", job_resume)
     add("POST", "/api/job/stop", job_stop)
     add("POST", "/api/job/override", job_override)
+    add("POST", "/api/job/recover", job_recover)
+    add("GET", "/api/macros", macros_get)
+    add("PUT", "/api/macros", macros_put)
+    add("POST", "/api/macros/{id}/run", macros_run)
     add("GET", "/api/sim", sim_get)
     add("POST", "/api/sim/probe", sim_probe)
     add("PUT", "/api/sim/surface", sim_surface)
+    add("POST", "/api/sim/restart-server", sim_restart_server)
     add("GET", "/api/grbl/settings", grbl_settings)
     add("PUT", "/api/grbl/settings", grbl_settings_put)
     add("POST", "/api/grbl/settings/refresh", grbl_settings_refresh)

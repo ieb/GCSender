@@ -22,6 +22,7 @@
       <span id="conn-info" class="muted"></span>
     </div>
     <div class="top-actions">
+      <button id="notify-toggle" type="button" title="Desktop notifications when a job finishes or needs you (tool change, error, interruption) while this tab is in the background">🔕</button>
       <button id="open-settings" type="button" title="GRBL and application settings">Settings</button>
       <button id="open-logs" type="button" title="Application log and serial transcripts">Logs</button>
     </div>
@@ -87,6 +88,10 @@
         <div class="row">
           <span id="sim-readout" class="muted small mono grow-input"></span>
           <button type="button" id="sim-goto" title="G53 G0 to 5 mm above the virtual surface at the current XY">5 mm above surface</button>
+        </div>
+        <div class="row" id="sim-restart-row" hidden>
+          <span class="muted small grow-input">Test recovery: drop the controller and job runner as if the server process died, then start again. The simulated machine keeps running its buffer; it resets on reconnect unless started with <code>--sim-no-reset</code>.</span>
+          <button type="button" id="sim-restart" class="danger">Simulate server restart</button>
         </div>
       </section>
 
@@ -228,6 +233,12 @@
         </div>
       </section>
 
+      <section class="panel" id="panel-macros" data-group="machine">
+        <h2><span>User commands</span><button type="button" id="macros-edit" class="link-button" title="Add, change or remove user commands">edit</button></h2>
+        <div id="macros-buttons" class="macro-buttons"></div>
+        <div id="macro-status" class="small muted mono"></div>
+      </section>
+
       <section class="panel" id="panel-control" data-group="machine">
         <h2>Control</h2>
         <div class="buttons">
@@ -296,6 +307,20 @@
         <div class="job-progress">
           <div class="bar"><div id="job-bar" class="fill"></div></div>
           <span id="job-progress-text" class="mono small"></span>
+        </div>
+        <div id="job-recovery" class="job-recovery" hidden>
+          <div class="rec-title" id="rec-title"></div>
+          <div id="rec-body" class="small"></div>
+          <div id="rec-reset" class="rec-checks small" hidden>
+            <label><input type="checkbox" id="rec-xy"> XY work zero re-established (jog to your XY reference, then Zero XY)</label>
+            <label><input type="checkbox" id="rec-z"> Z re-zeroed (Probe Z; with a heightmap, at the map origin)</label>
+          </div>
+          <div class="job-bar">
+            <label title="Line to resume from (safe entry)">line <input type="number" id="rec-line" min="1" class="num"></label>
+            <button type="button" id="rec-seamless" class="primary" title="Continue exactly where the machine stopped: restore the modal state, no extra moves">Resume here</button>
+            <button type="button" id="rec-entry" title="Raise to safe Z, move to the line's start, spindle + dwell, plunge, continue">Resume with safe entry</button>
+            <button type="button" id="rec-discard" class="danger" title="Forget the interrupted run (the program stays loaded)">Discard</button>
+          </div>
         </div>
         <div id="job-prompt" class="job-prompt" hidden>
           <span id="job-prompt-text"></span>
@@ -410,6 +435,22 @@
       <div class="dialog-foot">
         <span id="app-settings-status" class="muted small"></span>
         <button type="button" id="app-settings-save" class="primary">Save</button>
+      </div>
+    </section>
+  </dialog>
+
+  <dialog id="dlg-macros" class="dialog">
+    <form method="dialog" class="dialog-head">
+      <strong>User commands</strong>
+      <button class="close" value="close" title="Close">✕</button>
+    </form>
+    <section class="tab-body">
+      <p class="muted small">One G-code line per row, sent in order (each must be acknowledged before the next). <code>{expr}</code> inserts a value: <code>wx wy wz</code> work position, <code>mx my mz</code> machine position, <code>prbx prby prbz</code> last probe contact (machine), <code>safez</code>; with <code>+ - * /</code>, <code>min() max() abs()</code>, e.g. <code>G0 Z{max(safez, wz + 2)}</code>. A line using a position waits for Idle first; <code>wait idle</code> waits explicitly. Comments: <code>;</code> or <code>( )</code>.</p>
+      <div id="macro-list" class="macro-list"></div>
+      <div class="dialog-foot">
+        <button type="button" id="macro-add">Add</button>
+        <span id="macro-edit-status" class="muted small"></span>
+        <button type="button" id="macro-save" class="primary">Save</button>
       </div>
     </section>
   </dialog>

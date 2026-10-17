@@ -5,7 +5,9 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+import time
 from pathlib import Path
+from typing import Any
 
 from . import __version__
 from .api import SIM_PORT, build_router
@@ -14,13 +16,17 @@ from .events import EventBus
 from .logs import LogRing, Transcript
 from .heightmap.model import MapLibrary
 from .heightmap.service import HeightmapService
+from .jobs.journal import Journal
 from .jobs.library import JobLibrary
+from .macros import MacroRunner, MacroStore
 from .jobs.runner import JobRunner
 from .probe import Prober
 from .simulator import GrblSimulator, parse_surface_spec
 from .store import SettingsStore
 from .transport import SerialTransport, SimTransport, Transport
 from .webserver import AppServer
+
+log = logging.getLogger("gcsender")
 
 DEFAULT_WEB_ROOT = Path(__file__).resolve().parents[2] / "web"
 DEFAULT_STATE_DIR = Path.home() / ".gcsender"
@@ -90,14 +96,39 @@ def main(argv: list[str] | None = None) -> int:
     settings = SettingsStore(state_dir / "settings.json")
     transcript = Transcript(state_dir / "logs")
     bus = EventBus()
-    controller = Controller(bus, make_transport, settings=settings, transcript=transcript)
-    maps = HeightmapService(bus, MapLibrary(state_dir))
-    prober = Prober(controller, maps)
-    jobs = JobRunner(controller, maps, JobLibrary(state_dir))
-    router = build_router(
-        bus, controller, simulator=args.simulate, transcript=transcript, log_ring=log_ring,
-        maps=maps, prober=prober, sim=sim, jobs=jobs,
-    )
+    core: dict[str, Any] = {}
+    server_ref: list[AppServer] = []
+
+    def build_core() -> None:
+        """Everything a server process owns (rebuilt by the simulated restart)."""
+        controller = Controller(bus, make_transport, settings=settings, transcript=transcript)
+        maps = HeightmapService(bus, MapLibrary(state_dir))
+        prober = Prober(controller, maps)
+        jobs = JobRunner(controller, maps, JobLibrary(state_dir), Journal(state_dir / "journal.json"))
+        macros = MacroRunner(controller, MacroStore(state_dir / "macros.json"))
+        core.update(controller=controller, jobs=jobs)
+        core["router"] = build_router(
+            bus, controller, simulator=args.simulate, transcript=transcript, log_ring=log_ring,
+            maps=maps, prober=prober, sim=sim, jobs=jobs, macros=macros,
+            sim_restart=simulated_restart if sim else None,
+        )
+
+    def simulated_restart() -> None:
+        # Development aid: emulate the server process dying and starting again
+        # while the (simulated) machine keeps running its buffer.
+        log.warning("simulated server restart")
+        core["jobs"].abandon()
+        core["controller"].close()
+        time.sleep(1.0)
+        build_core()
+        server_ref[0].router = core["router"]
+        try:
+            core["controller"].connect(SIM_PORT, args.baud)
+        except ControllerError as e:
+            log.warning("reconnect after the simulated restart failed: %s", e)
+
+    build_core()
+    router = core["router"]
     lan = args.lan or host not in ("127.0.0.1", "localhost", "::1")
     try:
         server = AppServer(
@@ -112,6 +143,7 @@ def main(argv: list[str] | None = None) -> int:
     except OSError as e:
         print(f"cannot listen on {host}:{http_port}: {e}", file=sys.stderr)
         return 1
+    server_ref.append(server)
 
     shown_host = "127.0.0.1" if host in ("0.0.0.0", "::") else host
     print(f"gcsender {__version__} listening on http://{shown_host}:{server.port}/")
@@ -128,7 +160,7 @@ def main(argv: list[str] | None = None) -> int:
     if autoconnect:
         try:
             baud = args.baud if args.port or sim else settings.get("lastBaud")
-            controller.connect(autoconnect, baud)
+            core["controller"].connect(autoconnect, baud)
         except ControllerError as e:
             print(f"auto-connect to {autoconnect} failed: {e}", file=sys.stderr)
 
@@ -139,7 +171,7 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         server.shutting_down.set()
         bus.close()
-        controller.close()
+        core["controller"].close()
         transcript.close()
         server.server_close()
         if sim:

@@ -50,6 +50,8 @@ export function createStore() {
         state.probe = r.probe || null;
         state.sim = r.sim || null;
         state.job = r.job || null;
+        state.macros = r.macros || [];
+        state.macro = r.macro || null;
         state.console = (data.console || []).slice(-CONSOLE_LIMIT);
         emit("snapshot");
         return;
@@ -70,6 +72,8 @@ export function createStore() {
       case "probe":
       case "sim":
       case "job":
+      case "macros":
+      case "macro":
         state[type] = data;
         emit(type, data);
         return;

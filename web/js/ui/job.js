@@ -119,6 +119,63 @@ export function initJob(store, log, view) {
   $("#job-prompt-stop").addEventListener("click", () => run(api.jobStop(), "stop"));
   $("#job-continue").addEventListener("click", () => run(api.jobResume(), "continue"));
 
+  // -- recovery after an interruption (server restart, lost link, reset) -------
+
+  let lastSuggested = null;
+  $("#rec-seamless").addEventListener("click", () => {
+    const r = store.state.job?.recovery;
+    if (!r || r.seamlessLine === null) return;
+    if (!confirm(`Resume from line ${r.seamlessLine + 1} exactly where the machine stopped?\n\nThe modal state is restored first; there are no extra moves.`)) return;
+    run(api.jobRecover("seamless"), "resume");
+  });
+  $("#rec-entry").addEventListener("click", () => {
+    const line = Math.max(1, Math.floor(Number($("#rec-line").value) || 1)) - 1;
+    if (!confirm(`Resume from line ${line + 1} with a safe entry?\n\nRaise to safe Z, rapid to the line's start XY, start the spindle (with a dwell), plunge, then continue.`)) return;
+    const rezeroed = $("#rec-xy").checked && $("#rec-z").checked;
+    run(api.jobRecover("entry", line, rezeroed), "resume");
+  });
+  $("#rec-discard").addEventListener("click", () => {
+    if (!confirm("Discard the interrupted run? The program stays loaded.")) return;
+    run(api.jobRecover("discard"), "discard");
+  });
+  for (const id of ["#rec-xy", "#rec-z"]) $(id).addEventListener("change", () => update());
+
+  function renderRecovery(j) {
+    const box = $("#job-recovery");
+    const rec = j?.state === "interrupted" ? j.recovery : null;
+    box.hidden = !rec;
+    if (!rec) {
+      lastSuggested = null;
+      $("#rec-xy").checked = $("#rec-z").checked = false;
+      return;
+    }
+    const jr = rec.journal || {};
+    const when = jr.updated ? new Date(jr.updated * 1000).toLocaleTimeString() : "?";
+    $("#rec-title").textContent = `Interrupted: ${j.job?.name || "job"}`;
+    const parts = [`${rec.reason}.`];
+    if (rec.error) parts.push(`⚠ ${rec.error}. Only Discard is possible.`);
+    else {
+      parts.push(`Last recorded at ${when}: about line ${(jr.executing ?? jr.acked ?? -1) + 2} executing, up to line ${(jr.reserved ?? jr.sent ?? -1) + 1} possibly sent.`);
+      if (rec.mode === "attached") parts.push("The controller was not reset (re-attached).");
+      if (rec.phase !== "ready") parts.push(`Waiting: ${rec.phase}…`);
+      else if (rec.note) parts.push(`${rec.note.replace(/\.$/, "")}.`);
+    }
+    $("#rec-body").textContent = parts.filter(Boolean).join(" ");
+    const ready = !rec.error && rec.phase === "ready";
+    $("#rec-reset").hidden = rec.mode !== "reset";
+    const seamless = $("#rec-seamless");
+    seamless.hidden = rec.mode !== "attached" || rec.seamlessLine === null;
+    seamless.disabled = !ready;
+    if (rec.seamlessLine !== null && rec.seamlessLine !== undefined) seamless.textContent = `Resume here (line ${rec.seamlessLine + 1})`;
+    const rezeroed = $("#rec-xy").checked && $("#rec-z").checked;
+    $("#rec-entry").disabled = !ready || (rec.mode === "reset" && !rezeroed);
+    $("#rec-line").disabled = !ready;
+    if (rec.suggestedLine !== null && rec.suggestedLine !== undefined && rec.suggestedLine !== lastSuggested && document.activeElement !== $("#rec-line")) {
+      lastSuggested = rec.suggestedLine;
+      $("#rec-line").value = rec.suggestedLine + 1;
+    }
+  }
+
   const ovFeed = $("#job-ov-feed");
   ovFeed.addEventListener("input", () => { $("#job-ov-feed-val").textContent = `${ovFeed.value}%`; });
   ovFeed.addEventListener("change", () => run(api.jobOverride("feed", Number(ovFeed.value)), "feed override"));
@@ -228,11 +285,12 @@ export function initJob(store, log, view) {
     loadText(j);
     $("#job-name").textContent = j?.job ? `${j.job.name} · ${v?.lines ?? 0} lines${v?.kind === "transformed" ? " · heightmap" : ""}` : "no program";
     $("#job-heightmap").checked = !!j?.heightmap?.enabled;
-    $("#job-heightmap").disabled = active || !j?.job;
-    $("#job-unload").disabled = active || !j?.job;
-    $("#job-library").disabled = active;
+    $("#job-heightmap").disabled = active || st === "interrupted" || !j?.job;
+    $("#job-unload").disabled = active || st === "interrupted" || !j?.job;
+    $("#job-library").disabled = active || st === "interrupted";
     $("#job-file").disabled = false;
-    $("#job-start").disabled = !connected || active || !j?.job || store.state.status?.state !== "Idle";
+    $("#job-start").disabled = !connected || active || st === "interrupted" || !j?.job || store.state.status?.state !== "Idle";
+    renderRecovery(j);
     const pause = $("#job-pause");
     const held = st === "paused" || (st === "running" && store.state.status?.state === "Hold");
     pause.disabled = !(st === "running" || st === "paused");
@@ -254,7 +312,7 @@ export function initJob(store, log, view) {
 
     // progress
     const total = v?.lines || 0;
-    const doneLines = j ? Math.max(0, (j.executing ?? j.acked) + 1) : 0;
+    const doneLines = j ? Math.max(0, (st === "interrupted" ? j.acked : (j.executing ?? j.acked)) + 1) : 0;
     // The server publishes on change; keep the clocks moving in between.
     const since = (performance.now() - receivedAt) / 1000;
     const elapsed = j?.elapsed !== null && j?.elapsed !== undefined && active ? j.elapsed + since : j?.elapsed;

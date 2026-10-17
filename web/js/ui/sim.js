@@ -74,6 +74,7 @@ export function initSim(store, log) {
         el.value = String(Number(v.toFixed(4)));
       }
     }
+    $("#sim-restart-row").hidden = !s.canRestart;
     const mode = s.probeForced === true ? "touching" : s.probeForced === false ? "open" : "auto";
     for (const b of pins) b.classList.toggle("active", b.dataset.pin === mode);
     renderReadout();
@@ -92,6 +93,11 @@ export function initSim(store, log) {
     const gap = st.mpos[2] - z;
     readout.textContent = `surface under tool: machine Z ${fmt(z)} · ` + (gap > 0.0005 ? `tool ${fmt(gap)} mm above` : "tool touching");
   }
+
+  $("#sim-restart").addEventListener("click", () => {
+    if (!confirm("Simulate the server process dying and restarting?\n\nA running job is interrupted; the job panel then offers to recover it.")) return;
+    api.simRestart().then(() => log("simulated server restart…"), (e) => log(`restart: ${e.message}`));
+  });
 
   store.subscribe((kind) => {
     if (kind === "snapshot" || kind === "sim") render();

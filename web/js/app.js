@@ -14,6 +14,8 @@ import { initVisualizer } from "./view/visualizer.js";
 import { initLeftTabs, initProbe, initHeightmap } from "./ui/heightmap.js";
 import { initSim } from "./ui/sim.js";
 import { initBottomTabs, initJob } from "./ui/job.js";
+import { initMacros } from "./ui/macros.js";
+import { initNotify } from "./ui/notify.js";
 
 const store = createStore();
 const log = initConsole(store);
@@ -32,6 +34,8 @@ initHeightmap(store, log, view);
 initSim(store, log);
 initBottomTabs();
 initJob(store, log, view);
+initMacros(store, log);
+initNotify(store);
 
 const stream = new EventStream({
   onEvent: (type, data) => store.apply(type, data),
