@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
+import secrets
+import socket
 import sys
 import time
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +24,7 @@ from .jobs.journal import Journal
 from .jobs.library import JobLibrary
 from .macros import MacroRunner, MacroStore
 from .jobs.runner import JobRunner
+from .bugreport import BugReports
 from .probe import Prober
 from .profiles import ProfileStore
 from .simulator import GrblSimulator, parse_surface_spec
@@ -60,6 +65,40 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
+def setup_log_file(state_dir: Path) -> Path | None:
+    """Keep the application log on disk (for bug reports): 2 MB x 3 files."""
+    try:
+        (state_dir / "logs").mkdir(parents=True, exist_ok=True)
+        path = state_dir / "logs" / "gcsender.log"
+        handler = RotatingFileHandler(path, maxBytes=2 << 20, backupCount=2, encoding="utf-8")
+        handler.setLevel(logging.DEBUG)
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s [%(threadName)s]: %(message)s"))
+        logging.getLogger().addHandler(handler)
+        return path
+    except OSError as e:
+        print(f"cannot write the log file: {e}", file=sys.stderr)
+        return None
+
+
+def load_reports_token(state_dir: Path) -> str:
+    """A stable, read-only token for downloading bug reports remotely."""
+    path = state_dir / "reports-token"
+    try:
+        token = path.read_text(encoding="utf-8").strip()
+        if len(token) >= 16:
+            return token
+    except OSError:
+        pass
+    token = secrets.token_urlsafe(18)
+    try:
+        state_dir.mkdir(parents=True, exist_ok=True)
+        path.write_text(token + "\n", encoding="utf-8")
+        os.chmod(path, 0o600)
+    except OSError as e:
+        print(f"cannot save the reports token: {e}", file=sys.stderr)
+    return token
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -94,6 +133,8 @@ def main(argv: list[str] | None = None) -> int:
         return SerialTransport(port, baud)
 
     state_dir: Path = args.state_dir.expanduser()
+    log_file = setup_log_file(state_dir)
+    reports_token = load_reports_token(state_dir)
     settings = SettingsStore(state_dir / "settings.json")
     transcript = Transcript(state_dir / "logs")
     bus = EventBus()
@@ -107,12 +148,12 @@ def main(argv: list[str] | None = None) -> int:
         prober = Prober(controller, maps)
         jobs = JobRunner(controller, maps, JobLibrary(state_dir), Journal(state_dir / "journal.json"))
         macros = MacroRunner(controller, MacroStore(state_dir / "macros.json"))
-        core.update(controller=controller, jobs=jobs)
+        core.update(controller=controller, jobs=jobs, macros=macros)
         core["router"] = build_router(
             bus, controller, simulator=args.simulate, transcript=transcript, log_ring=log_ring,
             maps=maps, prober=prober, sim=sim, jobs=jobs, macros=macros,
             sim_restart=simulated_restart if sim else None,
-            profiles=ProfileStore(state_dir),
+            profiles=ProfileStore(state_dir), bugreports=bugreports, access=access,
         )
 
     def simulated_restart() -> None:
@@ -129,6 +170,11 @@ def main(argv: list[str] | None = None) -> int:
         except ControllerError as e:
             log.warning("reconnect after the simulated restart failed: %s", e)
 
+    access: dict[str, Any] = {}
+    bugreports = BugReports(
+        state_dir, bus=bus, core=lambda: core, transcript=transcript, log_ring=log_ring, log_file=log_file,
+        info={"version": __version__, "simulate": args.simulate, "lan": bool(args.lan), "http": args.http},
+    )
     build_core()
     router = core["router"]
     lan = args.lan or host not in ("127.0.0.1", "localhost", "::1")
@@ -141,11 +187,16 @@ def main(argv: list[str] | None = None) -> int:
             token=args.token,
             lan=lan,
             allowed_hosts=tuple(args.allow_host),
+            reports_token=reports_token,
         )
     except OSError as e:
         print(f"cannot listen on {host}:{http_port}: {e}", file=sys.stderr)
         return 1
     server_ref.append(server)
+    access.update(
+        lan=lan, port=server.port, hostname=socket.gethostname(), reportsToken=reports_token,
+        note=None if lan else "the server only listens on this computer: start it with --lan for remote access",
+    )
 
     shown_host = "127.0.0.1" if host in ("0.0.0.0", "::") else host
     print(f"gcsender {__version__} listening on http://{shown_host}:{server.port}/")
@@ -156,6 +207,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"simulated GRBL {args.simulate} available as port '{SIM_PORT}'")
 
     print(f"state directory: {state_dir}")
+    if lan:
+        print(f"bug reports (read-only token): http://<this-host>:{server.port}/api/bugreports/archive?t={reports_token}")
     autoconnect = args.port or (SIM_PORT if sim else None)
     if not autoconnect and settings.get("autoConnect") and settings.get("lastPort"):
         autoconnect = settings.get("lastPort")

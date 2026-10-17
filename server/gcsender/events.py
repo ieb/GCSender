@@ -97,6 +97,7 @@ class EventBus:
         self._lock = threading.Lock()
         self._ring: deque[Event] = deque(maxlen=ring_size)
         self._console: deque[Any] = deque(maxlen=console_history)
+        self._volatile: deque[Event] = deque(maxlen=600)  # e.g. status polls (for bug reports)
         self._retained: dict[str, Any] = {}
         self._subs: set[Subscription] = set()
         self._seq = 0
@@ -111,6 +112,7 @@ class EventBus:
                 self._retained[type] = data
             if volatile:
                 event = Event(type, data, None, time.time())
+                self._volatile.append(event)
             else:
                 self._seq += 1
                 event = Event(type, data, f"{self.boot}:{self._seq}", time.time())
@@ -140,6 +142,13 @@ class EventBus:
             "retained": dict(self._retained),
             "console": list(self._console),
         }
+
+    def history(self) -> dict[str, list[dict[str, Any]]]:
+        """Recent events (ring) and volatile events such as status polls, for diagnostics."""
+        with self._lock:
+            ring, vol = list(self._ring), list(self._volatile)
+        as_dict = lambda e: {"t": e.ts, "id": e.id, "type": e.type, "data": e.data}  # noqa: E731
+        return {"events": [as_dict(e) for e in ring], "volatile": [as_dict(e) for e in vol]}
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:

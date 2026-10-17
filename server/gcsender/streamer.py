@@ -12,7 +12,7 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Callable
+from typing import Any, Callable
 
 RX_BUDGET = 127
 
@@ -94,6 +94,19 @@ class Streamer:
         p.response = line
         p.event.set()
         return p
+
+    def describe(self) -> dict[str, Any]:
+        """What is in flight right now (for bug reports)."""
+        now = time.monotonic()
+        with self._cond:
+            return {
+                "budget": self.budget,
+                "used": self._used,
+                "inflight": [
+                    {"line": p.line, "source": p.source, "bytes": p.size, "age_s": round(now - p.sent_at, 3)}
+                    for p in self._inflight
+                ],
+            }
 
     def head_source(self) -> str | None:
         with self._cond:

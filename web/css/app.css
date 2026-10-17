@@ -450,3 +450,10 @@ input.narrow { width: 56px; }
   .layout { padding: 6px; }
 }
 @media (min-width: 901px) { #panel-visualizer { min-height: 260px; } }
+
+/* bug reports */
+#dlg-bugreport textarea { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; margin: 4px 0 6px; }
+#dlg-bugreport h3 { margin: 14px 0 6px; }
+#bug-list td:last-child { white-space: nowrap; text-align: right; }
+#bug-list .bug-title { max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#bug-remote code { user-select: all; word-break: break-all; }

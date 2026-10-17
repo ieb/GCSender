@@ -20,6 +20,7 @@ import { initDisplayEditor } from "./display.js";
 import { initLayout } from "./ui/layout.js";
 import { initProfiles } from "./ui/profiles.js";
 import { initHelp } from "./ui/help.js";
+import { initBugReport } from "./ui/bugreport.js";
 
 initDisplayEditor(); // first: theme, touch size and layout lock
 initLayout();
@@ -44,6 +45,7 @@ initMacros(store, log);
 initNotify(store);
 initProfiles(store);
 initHelp();
+initBugReport(store);
 
 const stream = new EventStream({
   onEvent: (type, data) => store.apply(type, data),

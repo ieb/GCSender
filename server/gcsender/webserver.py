@@ -131,11 +131,14 @@ class AppServer(ThreadingHTTPServer):
         token: str | None = None,
         lan: bool = False,
         allowed_hosts: tuple[str, ...] = (),
+        reports_token: str | None = None,
     ):
         self.bus = bus
         self.router = router
         self.web_root = web_root.resolve()
         self.token = token or secrets.token_urlsafe(24)
+        # Read-only token for downloading bug reports (GET /api/bugreports*) only.
+        self.reports_token = reports_token
         self.lan = lan
         self.extra_hosts = {h.lower() for h in allowed_hosts}
         self.shutting_down = threading.Event()
@@ -270,15 +273,26 @@ class Handler(BaseHTTPRequestHandler):
             except OSError:
                 pass
 
-    def _check_token(self, query: dict[str, list[str]]) -> None:
+    def _check_token(self, query: dict[str, list[str]], path: str = "") -> None:
         supplied = self.headers.get("X-GCS-Token")
         if supplied is None and self.command in ("GET", "HEAD"):
             supplied = (query.get("t") or [None])[0]
-        if not supplied or not hmac.compare_digest(supplied.encode(), self.server.token.encode()):
+        if not supplied:
             raise ApiError(401, "missing or invalid token")
+        if hmac.compare_digest(supplied.encode(), self.server.token.encode()):
+            return
+        reports = self.server.reports_token
+        if (
+            reports
+            and self.command in ("GET", "HEAD")
+            and (path == "/api/bugreports" or path.startswith("/api/bugreports/"))
+            and hmac.compare_digest(supplied.encode(), reports.encode())
+        ):
+            return  # the reports token can only read bug reports
+        raise ApiError(401, "missing or invalid token")
 
     def _api(self, path: str, query: dict[str, list[str]]) -> None:
-        self._check_token(query)
+        self._check_token(query, path)
         if path == "/api/events" and self.command == "GET":
             self._sse(query)
             return

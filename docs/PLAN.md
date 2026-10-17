@@ -211,6 +211,7 @@ Legend:
 | Script window (arbitrary JS) / plugins | ❌ | Covered by macros | ✗ |
 | Camera with reticle | ✅ | `getUserMedia` in the SPA | Later |
 | Theme (light/dark), help page | ✅ | Theme: follow the system, light or dark, applied before first paint. Help dialog with workflow, recovery, safety, troubleshooting and the live key bindings | P6 ✅ |
+| Bug reports (not in Candle) | ✅ | **🐞 Report**: the user describes the problem; the server saves a zip in `<state>/bugreports` (newest 100, ≤ 500 MB): summary, controller/streamer internals (in-flight lines), retained state, job + journal, `$$`/offsets/modal, recent events and status polls, thread stacks, application log tail (`logs/gcsender.log`, rotating), last 5000 serial-transcript lines, settings/macros/heightmap files, optionally the program (trimmed above 5 MB), and the browser's diagnostics (`js/diag.js`: errors, API calls, clicks and keys outside fields, link changes, on-screen messages, preferences). Each section is captured independently. List, download one, download all, delete. A separate persistent **reports token** reads reports only, for remote retrieval over `--lan` | P6 ✅ |
 
 ### 3.11 bCNC features considered
 | Feature | Phase |
@@ -331,6 +332,8 @@ web/                    served as the SPA
 - `journal.json`: active job, variant digest, sent/acked/executing line, `reserved` (the journal is written *before* streaming past it, 64 lines ahead, so the last line sent is always ≤ `reserved`), last MPos/WPos, offsets and modal state. Written every ~1 s, on state changes and ahead of streaming, via a temp file, fsync and an atomic replace. Removed when a job ends (done/stopped/failed); kept while `interrupted`.
 - `macros.json`: user commands.
 - `logs/serial-YYYYMMDD.log`: raw transcript.
+- `logs/gcsender.log` (+ `.1`, `.2`, 2 MB each): application log.
+- `bugreports/<id>.zip` + `<id>.json` (list entry); `reports-token`: the read-only token for remote report downloads.
 
 ---
 
@@ -347,6 +350,7 @@ web/                    served as the SPA
   - `Origin`, when present, must match the server's own origin.
   - The `Host` header must match the bound host or IP (DNS-rebinding defence).
   - No CORS headers are ever sent.
+- **Reports token:** a second, persistent token (`<state>/reports-token`) accepted only for `GET /api/bugreports…`, so reports can be fetched remotely without the control token.
 - The serial port is opened with `exclusive=True`, so no other program can grab it mid-job.
 
 ### 6.2 Endpoints
@@ -388,6 +392,8 @@ POST /api/settings/reset       GET /api/settings/export (file)   POST /api/setti
 GET/POST /api/settings/profiles {name}   POST /api/settings/profiles/load {name, macros}   DELETE /api/settings/profiles/{name}
 GET  /api/grbl/settings/export $$ backup (text)
 GET  /api/logs/serial          transcript download
+POST /api/bugreports           {description, client, includeProgram}   GET /api/bugreports (list + remote access info)
+GET  /api/bugreports/{id}      zip    GET /api/bugreports/archive (all, zip of zips)    DELETE /api/bugreports/{id}
 ```
 
 ### 6.3 SSE events

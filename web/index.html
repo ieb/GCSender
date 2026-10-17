@@ -6,6 +6,7 @@
   <meta name="gcs-token" content="">
   <title>GCSender</title>
   <link rel="stylesheet" href="css/app.css">
+  <script src="js/diag.js"></script>
   <script src="js/theme.js"></script>
   <script type="module" src="js/app.js"></script>
 </head>
@@ -26,6 +27,7 @@
       <button id="notify-toggle" type="button" title="Desktop notifications when a job finishes or needs you (tool change, error, interruption) while this tab is in the background">🔕</button>
       <button id="open-settings" type="button" title="Settings: GRBL $$ values, application settings and profiles, keyboard shortcuts, display">Settings</button>
       <button id="open-logs" type="button" title="Logs: the server's application log and the daily serial transcripts">Logs</button>
+      <button id="open-bugreport" type="button" title="Report a problem: saves a bug report on the server with what you describe plus the machine, job, log and browser state, so it can be diagnosed later. Past reports can be downloaded here.">🐞 Report</button>
       <button id="open-help" type="button" title="Help: how to use GCSender, safety notes and troubleshooting">Help</button>
     </div>
     <div class="link" id="link" title="Server link"><span class="dot"></span><span id="link-text">offline</span></div>
@@ -503,6 +505,32 @@
     </section>
   </dialog>
 
+  <dialog id="dlg-bugreport" class="dialog">
+    <form method="dialog" class="dialog-head">
+      <strong>Report a problem</strong>
+      <button class="close" value="close" title="Close">✕</button>
+    </form>
+    <section class="tab-body">
+      <label for="bug-desc"><b>What happened?</b> <span class="muted small">What did you do, what did you expect, and what did the machine or screen do instead?</span></label>
+      <textarea id="bug-desc" rows="5" maxlength="20000" placeholder="e.g. Pressed Start on part.nc; the job stopped at line 120 with error 20 and the spindle kept running."></textarea>
+      <label class="small"><input type="checkbox" id="bug-program" checked> include the loaded program (G-code)</label>
+      <p class="muted small">The report is saved on the server. It holds the machine state, GRBL settings and offsets, the job and its progress, the commands in GRBL's buffer, recent events and status updates, the server's log and stack traces, the last 5000 lines of the serial transcript, your settings, macros and heightmap, and from this browser: recent errors, failed requests, the buttons and keys you pressed (never what you type in fields) and what is shown on screen. Tokens are not included.</p>
+      <div class="dialog-foot">
+        <span id="bug-status" class="muted small"></span>
+        <button title="Save a bug report on the server now" type="button" id="bug-create" class="primary">Create report</button>
+      </div>
+      <h3 class="small">Saved reports <span class="muted">(kept on the server; newest 100)</span></h3>
+      <div class="table-wrap">
+        <table class="settings-table small"><thead><tr><th>Created</th><th>Description</th><th>State</th><th>Size</th><th></th></tr></thead>
+          <tbody id="bug-list"></tbody></table>
+      </div>
+      <div class="dialog-foot">
+        <span id="bug-remote" class="muted small"></span>
+        <a id="bug-archive" class="button-like" href="#" download title="Download every saved report in one zip">Download all</a>
+      </div>
+    </section>
+  </dialog>
+
   <dialog id="dlg-help" class="dialog help">
     <form method="dialog" class="dialog-head">
       <strong>GCSender help</strong>
@@ -547,6 +575,7 @@
         <li><b>Probe never triggers:</b> use <b>Test</b>; check the clip and the A5 / probe pin wiring.</li>
         <li><b>The board resets when the server starts:</b> normal for this board (DTR). See Recovery.</li>
         <li>Everything sent and received is in <b>Logs → Serial transcripts</b>.</li>
+        <li>Something wrong? Press <b>🐞 Report</b> straight away and describe it: the report captures the state at that moment.</li>
       </ul>
     </section>
   </dialog>

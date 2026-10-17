@@ -89,6 +89,27 @@ In simulate mode, **Simulate server restart** (Probe & heightmap tab) tries this
 - **Arithmetic:** `+ - * /` and `min max abs`, e.g. `G0 Z{max(safez, wz + 2)}`.
 
 `wait idle` waits for the moves to finish. Esc / Stop aborts a running command.
+
+### Reporting a problem
+Press **🐞 Report**, say what you did and what went wrong, and press **Create report**. A zip is saved in
+`<state-dir>/bugreports` (newest 100 are kept). It contains:
+- the machine state, `$$`, offsets, the job and its progress, and the commands in GRBL's buffer;
+- recent events and status updates, every server thread's stack, and the application log (`<state-dir>/logs/gcsender.log`);
+- the last 5000 lines of the serial transcript, your settings, user commands, journal and heightmap;
+- optionally the loaded program;
+- from the browser: errors, failed requests, the buttons and keys pressed (never what is typed into fields) and what was on screen.
+
+Tokens are never included. The same dialog lists earlier reports to download or delete.
+
+**Fetching reports from another computer.** Start the server with `--lan`. The dialog (and the start-up output) shows
+a URL containing a separate **reports token**. That token is kept in `<state-dir>/reports-token` (delete the file to
+change it) and can *only* read bug reports, so it can be shared without giving control of the machine:
+
+```sh
+curl -o reports.zip "http://<host>:8080/api/bugreports/archive?t=<reports-token>"            # all reports
+curl -H "X-GCS-Token: <reports-token>" http://<host>:8080/api/bugreports                     # list (JSON)
+curl -o r.zip -H "X-GCS-Token: <reports-token>" http://<host>:8080/api/bugreports/<id>       # one report
+```
 | `--state-dir DIR` | Settings and serial transcripts (default `~/.gcsender`) |
 
 ## Security
@@ -97,6 +118,7 @@ The server can move a machine, so:
 - Every API call needs a random per-run token. The page served to localhost gets it automatically; LAN devices use
   the printed `?t=` URL.
 - Requests with a foreign `Host` or `Origin`, and non-JSON form posts, are rejected.
+- The bug-reports token (see *Reporting a problem*) only allows `GET /api/bugreports…`.
 
 ## Development
 ```sh

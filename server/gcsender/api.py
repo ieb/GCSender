@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from typing import Any, Callable
 
 from . import __version__
@@ -17,6 +18,7 @@ from .jobs.library import MAX_JOB_BYTES, JobError
 from .jobs.runner import JobRunner
 from .macros import MacroError, MacroRunner
 from .macros import validate as validate_macros
+from .bugreport import BugReports, ReportError
 from .probe import Prober
 from .profiles import ProfileError, ProfileStore
 from . import profiles as prof
@@ -44,6 +46,8 @@ def _wrap(fn: Callable[[Request], Any]) -> Callable[[Request], Any]:
             raise ApiError(400, str(e)) from None
         except MacroError as e:
             raise ApiError(404 if "no such" in str(e) else 400, str(e)) from None
+        except ReportError as e:
+            raise ApiError(404 if "no such" in str(e) else 400, str(e)) from None
         except ProfileError as e:
             raise ApiError(404 if "no such" in str(e) else 400, str(e)) from None
 
@@ -64,6 +68,8 @@ def build_router(
     sim: Any = None,
     sim_restart: Callable[[], None] | None = None,
     profiles: ProfileStore | None = None,
+    bugreports: BugReports | None = None,
+    access: dict[str, Any] | None = None,
 ) -> Router:
     r = Router()
 
@@ -576,6 +582,32 @@ def build_router(
         lines += [f"${k}={v}" for k, v in sorted(values.items(), key=lambda kv: int(kv[0]))]
         return RawResponse(("\n".join(lines) + "\n").encode(), "text/plain; charset=utf-8", "grbl-settings.txt")
 
+    # -- bug reports ------------------------------------------------------------
+
+    def _reports() -> BugReports:
+        if bugreports is None:
+            raise ApiError(503, "bug reports unavailable")
+        return bugreports
+
+    def reports_create(req: Request) -> Any:
+        body = req.json()
+        return _reports().create(body.get("description", ""), body.get("client"), _flag(body, "includeProgram", True))
+
+    def reports_list(_req: Request) -> Any:
+        return {"reports": _reports().list(), "access": access or {}}
+
+    def reports_get(req: Request) -> Any:
+        rid = req.params["id"]
+        return RawResponse(_reports().data(rid), "application/zip", f"gcsender-bugreport-{rid}.zip")
+
+    def reports_archive(_req: Request) -> Any:
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        return RawResponse(_reports().archive(), "application/zip", f"gcsender-bugreports-{stamp}.zip")
+
+    def reports_delete(req: Request) -> Any:
+        _reports().delete(req.params["id"])
+        return {"reports": _reports().list()}
+
     # -- logs -----------------------------------------------------------------
 
     def logs_app(_req: Request) -> Any:
@@ -657,6 +689,11 @@ def build_router(
     add("POST", "/api/settings/profiles/load", profiles_load)
     add("DELETE", "/api/settings/profiles/{name}", profiles_delete)
     add("GET", "/api/grbl/settings/export", grbl_settings_export)
+    add("POST", "/api/bugreports", reports_create)
+    add("GET", "/api/bugreports", reports_list)
+    add("GET", "/api/bugreports/archive", reports_archive)
+    add("GET", "/api/bugreports/{id}", reports_get)
+    add("DELETE", "/api/bugreports/{id}", reports_delete)
     add("GET", "/api/settings", app_settings)
     add("PUT", "/api/settings", app_settings_put)
     add("GET", "/api/logs/app", logs_app)

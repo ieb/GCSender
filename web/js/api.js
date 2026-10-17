@@ -38,9 +38,13 @@ export async function request(method, path, body, { raw = false } = {}) {
     init.body = JSON.stringify(body);
   }
   let res;
+  const t0 = performance.now();
+  const note = (status, error) =>
+    window.gcsDiag?.api({ method, path: path.split("?")[0], status, ms: Math.round(performance.now() - t0), error });
   try {
     res = await fetch(path, init);
   } catch (e) {
+    note(0, "server unreachable");
     throw new ApiError(0, "server unreachable");
   }
   let payload = null;
@@ -48,7 +52,12 @@ export async function request(method, path, body, { raw = false } = {}) {
   if (text) {
     try { payload = JSON.parse(text); } catch { payload = { error: text }; }
   }
-  if (!res.ok) throw new ApiError(res.status, (payload && payload.error) || res.statusText);
+  if (!res.ok) {
+    const msg = (payload && payload.error) || res.statusText;
+    note(res.status, String(msg).slice(0, 500));
+    throw new ApiError(res.status, msg);
+  }
+  note(res.status);
   return payload;
 }
 
@@ -121,6 +130,14 @@ export const api = {
   },
   simProbe: (forced) => request("POST", "/api/sim/probe", { forced }),
   simSurface: (changes) => request("PUT", "/api/sim/surface", changes),
+};
+
+export const bugReports = {
+  list: () => request("GET", "/api/bugreports"),
+  create: (description, client, includeProgram) => request("POST", "/api/bugreports", { description, client, includeProgram }),
+  remove: (id) => request("DELETE", `/api/bugreports/${encodeURIComponent(id)}`),
+  url: (id) => downloadUrl(`/api/bugreports/${encodeURIComponent(id)}`),
+  archiveUrl: () => downloadUrl("/api/bugreports/archive"),
 };
 
 export function downloadUrl(path) {
