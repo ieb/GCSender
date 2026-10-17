@@ -63,8 +63,37 @@ export const api = {
   appSettings: () => request("GET", "/api/settings"),
   appSettingsWrite: (values) => request("PUT", "/api/settings", values),
   appLog: () => request("GET", "/api/logs/app"),
+  jogStep: (delta, feed) => request("POST", "/api/jog/step", { x: delta[0], y: delta[1], z: delta[2], feed }),
+  stop: () => request("POST", "/api/stop", {}),
+  wcsSelect: (wcs) => request("POST", "/api/wcs/select", { wcs }),
+  wcsZero: (axes, persistent) => request("POST", "/api/wcs/zero", { axes, persistent }),
+  clearG92: () => request("POST", "/api/wcs/clear-g92", {}),
+  goto: (target, safeZ = true) => request("POST", "/api/goto", { ...target, safeZ }),
+  spindle: (on, rpm, direction = "cw") => request("POST", "/api/spindle", { on, rpm, direction }),
+  coolant: (flags) => request("POST", "/api/coolant", flags),
   transcripts: () => request("GET", "/api/logs/serial/files"),
+  probeZ: (opts = {}) => request("POST", "/api/probe/z", opts),
+  probeTest: (expect) => request("POST", "/api/probe/test", { expect }),
+  heightmap: () => request("GET", "/api/heightmap"),
+  heightmapParams: (params) => request("PUT", "/api/heightmap", params),
+  heightmapCells: (cells) => request("PATCH", "/api/heightmap/cells", { cells }),
+  heightmapClear: () => request("POST", "/api/heightmap/clear", {}),
+  heightmapAuto: (gcode, margin = 0) => request("POST", "/api/heightmap/auto", { gcode, margin }),
+  heightmapProbe: () => request("POST", "/api/heightmap/probe", {}),
+  heightmapAbort: () => request("POST", "/api/heightmap/abort", {}),
+  heightmapInterpolated: () => request("GET", "/api/heightmap/interpolated"),
+  heightmapImport: (text) => request("POST", "/api/heightmap/import", { text }),
+  heightmapLibrary: () => request("GET", "/api/heightmap/library"),
+  heightmapSave: (name) => request("POST", "/api/heightmap/library/save", { name }),
+  heightmapLoad: (name) => request("POST", "/api/heightmap/library/load", { name }),
+  heightmapDelete: (name) => request("POST", "/api/heightmap/library/delete", { name }),
+  heightmapOrigin: () => request("POST", "/api/heightmap/origin", {}),
+  heightmapTransform: (gcode) => request("POST", "/api/heightmap/transform", { gcode }),
 };
+
+export function heightmapExportUrl() {
+  return "/api/heightmap/export?" + new URLSearchParams({ t: token || "" }).toString();
+}
 
 export function transcriptUrl(date) {
   const p = new URLSearchParams({ t: token || "", date });
@@ -76,3 +105,4 @@ export function eventsUrl(lastId) {
   if (lastId) p.set("last", lastId);
   return "/api/events?" + p.toString();
 }
+

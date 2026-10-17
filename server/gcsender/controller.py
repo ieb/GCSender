@@ -18,8 +18,10 @@ import time
 from typing import Any, Callable
 
 from . import capabilities
+from .errors import ControllerError
 from .events import EventBus
 from .grbl_messages import explain_alarm, explain_error
+from .jog import Jogger
 from .logs import Transcript
 from .machine import MachineModel, parse_modal
 from .protocol import classify
@@ -41,15 +43,11 @@ OFFSET_CHANGING = re.compile(r"G(?:10|92(?:\.1)?|43\.1|49|28\.1|30\.1)(?![\d.])"
 MODAL_WORDS = re.compile(r"[GMTFS]")
 SETTING_WRITE = re.compile(r"^\$\d+=")
 IDLE_LIKE = ("Idle", "Alarm")
+MOVING = ("Run", "Jog", "Home", "Hold")
+FAST_POLL_S = 0.05
 G43_1 = re.compile(r"G43\.1(?![\d.])")
 G49 = re.compile(r"G49(?![\d.])")
 Z_WORD = re.compile(r"Z([-+]?(?:\d+\.?\d*|\.\d+))")
-
-
-class ControllerError(Exception):
-    def __init__(self, message: str, status: int = 409):
-        super().__init__(message)
-        self.status = status
 
 
 def _fmt(v: float) -> str:
@@ -91,10 +89,17 @@ class Controller:
         self._restore_pending: dict[str, Any] | None = None
         self._reset_on_connect_sent = False
         self._last_alarm_at = 0.0
+        self._status_cond = threading.Condition()
+        self._status_seq = 0
+        self._fast_poll_until = 0.0
+        self.busy: str | None = None  # e.g. "probing": console/UI/jog commands are refused
+        self.stop_hooks: list[Callable[[], None]] = []  # called on Stop and Reset (abort routines)
+        self.jogger: Any = None  # set by Jogger(controller)
         self._tasks: queue.Queue[Callable[[], None] | None] = queue.Queue()
         self._stop = threading.Event()
         self._publish_connection()
         self.bus.publish("app.settings", self.settings.all(), retain=True)
+        Jogger(self)
         self._worker = threading.Thread(target=self._work_loop, name="controller-tasks", daemon=True)
         self._worker.start()
         self._poller = threading.Thread(target=self._poll_loop, name="status-poll", daemon=True)
@@ -131,9 +136,39 @@ class Controller:
 
     @property
     def poll_interval(self) -> float:
-        if self._poll_override is not None:
-            return self._poll_override
-        return self.settings.get("statusInterval") / 1000.0
+        base = self._poll_override if self._poll_override is not None else self.settings.get("statusInterval") / 1000.0
+        if time.monotonic() < self._fast_poll_until:
+            return min(base, FAST_POLL_S)
+        return base
+
+    def boost_polling(self, seconds: float) -> None:
+        """Poll status faster for a while (jogging, stopping)."""
+        self._fast_poll_until = max(self._fast_poll_until, time.monotonic() + seconds)
+
+    @property
+    def status_seq(self) -> int:
+        """Increments with every status report (lets callers detect a fresh report)."""
+        return self._status_seq
+
+    @property
+    def machine_state(self) -> str | None:
+        return self._machine_state
+
+    def wait_status(self, pred: Callable[[dict[str, Any]], bool], timeout: float) -> dict[str, Any] | None:
+        """Wait for a *new* status report satisfying ``pred``; None on timeout."""
+        deadline = time.monotonic() + timeout
+        with self._status_cond:
+            seq = self._status_seq
+            while True:
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    return None
+                self._status_cond.wait(left)
+                if self._status_seq != seq:
+                    seq = self._status_seq
+                    st = self.model.status
+                    if st is not None and pred(st):
+                        return st
 
     def update_settings(self, changes: dict[str, Any]) -> dict[str, Any]:
         values = self.settings.update(changes)
@@ -185,6 +220,8 @@ class Controller:
         return self.connection
 
     def disconnect(self, reason: str | None = None) -> None:
+        if self.jogger is not None:
+            self.jogger.reset()
         with self._lock:
             transport, self._transport = self._transport, None
             streamer, self._streamer = self._streamer, None
@@ -245,6 +282,8 @@ class Controller:
         streamer = self._streamer
         if streamer is None or self._conn.get("state") in ("disconnected", "connecting"):
             raise ControllerError("not connected")
+        if self.busy and source in ("console", "ui", "jog"):
+            raise ControllerError(f"busy: {self.busy}")
         upper = re.sub(r"\s+", "", line.upper())
         if upper == "$C" and self._machine_state == "Check":
             # Leaving check mode resets GRBL; restore the parser state afterwards.
@@ -292,6 +331,9 @@ class Controller:
         if self._transport is None:
             raise ControllerError("not connected")
         if op == "reset":
+            if self.jogger is not None:
+                self.jogger.reset()
+            self._run_stop_hooks()
             self._arm_reset(restore)
         try:
             self._write_raw(data)
@@ -385,6 +427,74 @@ class Controller:
                 return
         self._refresh_modal()
         self._refresh_offsets()
+
+    def safe_stop(self) -> dict[str, Any]:
+        """Stop all motion as quickly as possible without an alarm (Esc / Stop).
+
+        0.9: feed hold, wait until the hold has fully decelerated (position
+        stable across two reports), then soft reset - no alarm, position kept -
+        and restore offsets/parser state. 1.1 during a jog step: jog cancel (0x85).
+        """
+        if self._transport is None:
+            raise ControllerError("not connected")
+        self._run_stop_hooks()
+        caps = self._caps or {}
+        state = self._machine_state
+        if caps.get("family") == "1.1" and state == "Jog":
+            self._write_raw(b"\x85")
+            self._console("rt", "jogCancel", "ui")
+            self.transcript.write("!", "jogCancel")
+            return {"method": "jog-cancel"}
+        if state not in MOVING:
+            return {"method": "none", "state": state}
+        self.boost_polling(10)
+        self._write_raw(b"!")
+        self._console("rt", "hold", "ui")
+        self.transcript.write("!", "hold (stop)")
+        if not self._wait_hold_settled(timeout=10):
+            raise ControllerError("the machine did not come to rest after feed hold; it is still held", 504)
+        self._arm_reset(None)
+        if self.jogger is not None:
+            self.jogger.reset()
+        self._write_raw(b"\x18")
+        self._console("rt", "reset", "ui")
+        self.transcript.write("!", "reset (stop)")
+        if self._streamer:
+            self._streamer.reset("reset")
+        return {"method": "hold-reset"}
+
+    def _run_stop_hooks(self) -> None:
+        for hook in self.stop_hooks:
+            try:
+                hook()
+            except Exception:  # pragma: no cover - a hook must never block a stop
+                log.exception("stop hook failed")
+
+    def _wait_hold_settled(self, timeout: float) -> bool:
+        deadline = time.monotonic() + timeout
+        last = None
+        stable = 0
+        hold_sub = (self._caps or {}).get("holdSubstate")
+        while time.monotonic() < deadline:
+            st = self.wait_status(lambda s: True, timeout=1.0)
+            if st is None:
+                continue
+            if st["state"] == "Hold":
+                if hold_sub:
+                    if st.get("substate") == 0:
+                        return True
+                    continue
+                mpos = st.get("mpos")
+                if last is not None and mpos == last:
+                    stable += 1
+                    if stable >= 2:
+                        return True
+                else:
+                    stable = 0
+                last = mpos
+            elif st["state"] in ("Idle", "Alarm"):
+                return st["state"] == "Idle"
+        return False
 
     # ------------------------------------------------------------- reading
 
@@ -502,6 +612,9 @@ class Controller:
             state = st["state"]
             self._machine_state = state
             self.model.status = st
+            with self._status_cond:
+                self._status_seq += 1
+                self._status_cond.notify_all()
             restore = None
             if self._restore_pending is not None and state in IDLE_LIKE:
                 restore, self._restore_pending = self._restore_pending, None
@@ -589,6 +702,12 @@ class Controller:
         except ControllerError as e:
             log.debug("%s failed: %s", line, e)
             return None
+
+    def sync_modal(self) -> dict[str, Any] | None:
+        """Query $G now (works in any state) so the caller sees the parser state
+        after everything already sent; used before restoring modal state."""
+        self._system("$G", timeout=5)
+        return self.model.modal
 
     def _refresh_modal(self) -> None:
         self._modal_refresh_queued = False

@@ -16,6 +16,8 @@ export function createStore() {
     warnings: [],
     build: null,
     appSettings: null,
+    heightmap: null,
+    probe: null,
     console: [],
   };
   const listeners = new Set();
@@ -43,6 +45,8 @@ export function createStore() {
         state.warnings = r.warnings || [];
         state.build = r.build || null;
         state.appSettings = r["app.settings"] || null;
+        state.heightmap = r.heightmap || null;
+        state.probe = r.probe || null;
         state.console = (data.console || []).slice(-CONSOLE_LIMIT);
         emit("snapshot");
         return;
@@ -59,6 +63,8 @@ export function createStore() {
       case "alarm":
       case "warnings":
       case "build":
+      case "heightmap":
+      case "probe":
         state[type] = data;
         emit(type, data);
         return;

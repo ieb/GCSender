@@ -5,8 +5,13 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from . import __version__
-from .controller import Controller, ControllerError
+from .controller import Controller
+from .errors import ControllerError
 from .events import EventBus
+from . import operations as ops
+from .heightmap.model import MapError
+from .heightmap.service import HeightmapService
+from .probe import Prober
 from .logs import LogRing, Transcript
 from .store import SettingsError
 from .transport import list_serial_ports
@@ -22,6 +27,8 @@ def _wrap(fn: Callable[[Request], Any]) -> Callable[[Request], Any]:
             return fn(req)
         except ControllerError as e:
             raise ApiError(e.status, str(e)) from None
+        except MapError as e:
+            raise ApiError(409, str(e)) from None
         except SettingsError as e:
             raise ApiError(400, str(e)) from None
 
@@ -35,6 +42,9 @@ def build_router(
     simulator: str | None = None,
     transcript: Transcript | None = None,
     log_ring: LogRing | None = None,
+    maps: HeightmapService | None = None,
+    prober: Prober | None = None,
+    sim: Any = None,
 ) -> Router:
     r = Router()
 
@@ -105,6 +115,199 @@ def build_router(
             raise ApiError(400, f"op must be one of {', '.join(CONTROL_OPS)}")
         return ctl().control(op)
 
+    # -- step jogging and stop -----------------------------------------------------
+
+    def _num(body: dict[str, Any], key: str, required: bool = True) -> float | None:
+        v = body.get(key)
+        if v is None and not required:
+            return None
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            raise ApiError(400, f"{key} must be a number")
+        return float(v)
+
+    def jog_step(req: Request) -> Any:
+        body = req.json()
+        delta = [_num(body, a, required=False) or 0.0 for a in ("x", "y", "z")]
+        return ctl().jogger.step(delta, _num(body, "feed"))
+
+    def stop(_req: Request) -> Any:
+        return ctl().safe_stop()
+
+    # -- WCS, positioning, spindle, coolant -----------------------------------
+
+    def wcs_select(req: Request) -> Any:
+        return ops.select_wcs(ctl(), req.json().get("wcs", ""))
+
+    def wcs_zero(req: Request) -> Any:
+        body = req.json()
+        axes = body.get("axes")
+        if not isinstance(axes, dict):
+            raise ApiError(400, "axes must be an object like {\"x\": 0}")
+        persistent = body.get("persistent", True)
+        if not isinstance(persistent, bool):
+            raise ApiError(400, "persistent must be a boolean")
+        return ops.set_zero(ctl(), axes, persistent)
+
+    def wcs_clear_g92(_req: Request) -> Any:
+        return ops.clear_g92(ctl())
+
+    def goto(req: Request) -> Any:
+        body = req.json()
+        target = {a: body[a] for a in ("x", "y", "z") if a in body}
+        use_safe = body.get("safeZ", True)
+        if not isinstance(use_safe, bool):
+            raise ApiError(400, "safeZ must be a boolean")
+        safe = float(ctl().settings.get("safeZ")) if use_safe else None
+        return ops.goto(ctl(), target, safe)
+
+    def spindle(req: Request) -> Any:
+        body = req.json()
+        on = body.get("on")
+        if not isinstance(on, bool):
+            raise ApiError(400, "on must be a boolean")
+        direction = body.get("direction", "cw")
+        if direction not in ("cw", "ccw"):
+            raise ApiError(400, "direction must be cw or ccw")
+        return ops.spindle(ctl(), on, _num(body, "rpm", required=False), direction)
+
+    def coolant(req: Request) -> Any:
+        body = req.json()
+        for k in ("flood", "mist"):
+            if k in body and not isinstance(body[k], bool):
+                raise ApiError(400, f"{k} must be a boolean")
+        return ops.coolant(ctl(), body.get("flood"), body.get("mist"))
+
+    # -- probing ---------------------------------------------------------------
+
+    def _maps() -> HeightmapService:
+        if maps is None:
+            raise ApiError(503, "heightmaps unavailable")
+        return maps
+
+    def _prober() -> Prober:
+        if prober is None:
+            raise ApiError(503, "probing unavailable")
+        return prober
+
+    def _flag(body: dict[str, Any], key: str, default: bool) -> bool:
+        v = body.get(key, default)
+        if not isinstance(v, bool):
+            raise ApiError(400, f"{key} must be a boolean")
+        return v
+
+    def probe_z(req: Request) -> Any:
+        body = req.json()
+        st = ctl().settings
+        opts: dict[str, Any] = {}
+        for key, setting in (("depth", "probeDepth"), ("fastFeed", "probeFastFeed"), ("slowFeed", "probeSlowFeed"),
+                             ("backoff", "probeBackoff"), ("plate", "probePlate"), ("retract", "probeRetract")):
+            v = _num(body, key, required=False)
+            opts[key] = float(st.get(setting)) if v is None else v
+            if opts[key] < 0 or (key in ("depth", "fastFeed", "slowFeed", "backoff") and opts[key] <= 0):
+                raise ApiError(400, f"{key} out of range")
+        opts["twoStage"] = _flag(body, "twoStage", bool(st.get("probeTwoStage")))
+        opts["setZero"] = _flag(body, "setZero", bool(st.get("probeSetZero")))
+        return _prober().probe_z(opts)
+
+    def probe_test(req: Request) -> Any:
+        return _prober().test(req.json().get("expect", ""))
+
+    def probe_status(_req: Request) -> Any:
+        return _prober().status
+
+    # -- heightmap -------------------------------------------------------------
+
+    MAX_GCODE = 32 << 20
+
+    def _text(body: dict[str, Any], key: str) -> str:
+        v = body.get(key)
+        if not isinstance(v, str):
+            raise ApiError(400, f"{key} must be a string")
+        return v
+
+    def hm_get(_req: Request) -> Any:
+        return _maps().state()
+
+    def hm_put(req: Request) -> Any:
+        body = req.json()
+        if not isinstance(body, dict):
+            raise ApiError(400, "body must be an object of parameters")
+        return {**_maps().set_params(body), "heightmap": _maps().state()}
+
+    def hm_cells(req: Request) -> Any:
+        cells = req.json().get("cells")
+        if not isinstance(cells, list):
+            raise ApiError(400, "cells must be a list")
+        _maps().set_cells(cells)
+        return _maps().state()
+
+    def hm_clear(_req: Request) -> Any:
+        _maps().clear_values()
+        return _maps().state()
+
+    def hm_auto(req: Request) -> Any:
+        body = req.json(MAX_GCODE)
+        margin = _num(body, "margin", required=False) or 0.0
+        return _maps().auto_border(_text(body, "gcode"), margin)
+
+    def hm_probe(_req: Request) -> Any:
+        return _prober().probe_map()
+
+    def hm_abort(_req: Request) -> Any:
+        p = _prober()
+        if not p.running:
+            return {"running": False}
+        # Abort = the normal stop: hold, settle, reset, restore.
+        return ctl().safe_stop()
+
+    def hm_interpolated(_req: Request) -> Any:
+        return _maps().interpolated()
+
+    def hm_export(_req: Request) -> Any:
+        m = _maps()
+        name = (m.name or "heightmap") + ".map"
+        return RawResponse(m.export_text().encode(), "text/plain; charset=utf-8", name)
+
+    def hm_import(req: Request) -> Any:
+        _maps().import_text(_text(req.json(), "text"), None)
+        return _maps().state()
+
+    def hm_library(_req: Request) -> Any:
+        return {"maps": _maps().library.names()}
+
+    def hm_save(req: Request) -> Any:
+        _maps().save(_text(req.json(), "name").strip())
+        return _maps().state()
+
+    def hm_load(req: Request) -> Any:
+        _maps().load(_text(req.json(), "name"))
+        return _maps().state()
+
+    def hm_delete(req: Request) -> Any:
+        _maps().delete(_text(req.json(), "name"))
+        return {"maps": _maps().library.names()}
+
+    def hm_origin(_req: Request) -> Any:
+        p = _maps().hm.params
+        return ops.goto(ctl(), {"x": p.originX, "y": p.originY}, float(ctl().settings.get("safeZ")))
+
+    def hm_transform(req: Request) -> Any:
+        body = req.json(MAX_GCODE)
+        tol = float(ctl().settings.get("arcTolerance")) if controller else 0.01
+        result = _maps().transform(_text(body, "gcode"), tol)
+        if body.get("includeLineMap"):
+            return result
+        return {"gcode": result["gcode"], "stats": result["stats"]}
+
+    def sim_probe(req: Request) -> Any:
+        if sim is None:
+            raise ApiError(404, "simulator not enabled")
+        forced = req.json().get("forced")
+        if forced is not None and not isinstance(forced, bool):
+            raise ApiError(400, "forced must be true, false or null")
+        sim.probe_forced = forced
+        return {"forced": forced}
+
     # -- GRBL settings ($$) ---------------------------------------------------
 
     def grbl_settings(_req: Request) -> Any:
@@ -170,6 +373,34 @@ def build_router(
     add("POST", "/api/command", command)
     add("POST", "/api/realtime", realtime)
     add("POST", "/api/control", control)
+    add("POST", "/api/jog/step", jog_step)
+    add("POST", "/api/stop", stop)
+    add("POST", "/api/wcs/select", wcs_select)
+    add("POST", "/api/wcs/zero", wcs_zero)
+    add("POST", "/api/wcs/clear-g92", wcs_clear_g92)
+    add("POST", "/api/goto", goto)
+    add("POST", "/api/spindle", spindle)
+    add("POST", "/api/coolant", coolant)
+    add("POST", "/api/probe/z", probe_z)
+    add("POST", "/api/probe/test", probe_test)
+    add("GET", "/api/probe", probe_status)
+    add("GET", "/api/heightmap", hm_get)
+    add("PUT", "/api/heightmap", hm_put)
+    add("PATCH", "/api/heightmap/cells", hm_cells)
+    add("POST", "/api/heightmap/clear", hm_clear)
+    add("POST", "/api/heightmap/auto", hm_auto)
+    add("POST", "/api/heightmap/probe", hm_probe)
+    add("POST", "/api/heightmap/abort", hm_abort)
+    add("GET", "/api/heightmap/interpolated", hm_interpolated)
+    add("GET", "/api/heightmap/export", hm_export)
+    add("POST", "/api/heightmap/import", hm_import)
+    add("GET", "/api/heightmap/library", hm_library)
+    add("POST", "/api/heightmap/library/save", hm_save)
+    add("POST", "/api/heightmap/library/load", hm_load)
+    add("POST", "/api/heightmap/library/delete", hm_delete)
+    add("POST", "/api/heightmap/origin", hm_origin)
+    add("POST", "/api/heightmap/transform", hm_transform)
+    add("POST", "/api/sim/probe", sim_probe)
     add("GET", "/api/grbl/settings", grbl_settings)
     add("PUT", "/api/grbl/settings", grbl_settings_put)
     add("POST", "/api/grbl/settings/refresh", grbl_settings_refresh)

@@ -55,7 +55,150 @@
         </div>
       </section>
 
-      <section class="panel" id="panel-control">
+      <nav class="left-tabs" role="tablist">
+        <button type="button" class="tab" data-left-tab="machine" role="tab">Machine</button>
+        <button type="button" class="tab" data-left-tab="probe" role="tab">Probe &amp; heightmap</button>
+      </nav>
+
+      <section class="panel" id="panel-probe" data-group="probe" hidden>
+        <h2>Z probe</h2>
+        <div class="form-grid compact" id="probe-form">
+          <label for="pr-plate">Plate thickness</label><input id="pr-plate" data-setting="probePlate" type="number" step="0.01" min="0">
+          <label for="pr-depth">Max depth</label><input id="pr-depth" data-setting="probeDepth" type="number" step="0.5" min="0.1">
+          <label for="pr-fast">Fast / slow feed</label>
+          <span class="pair"><input id="pr-fast" data-setting="probeFastFeed" type="number" step="1" min="1"><input id="pr-slow" data-setting="probeSlowFeed" type="number" step="1" min="1"></span>
+          <label for="pr-two">Two-stage (fast, back off, slow)</label><input id="pr-two" data-setting="probeTwoStage" type="checkbox">
+          <label for="pr-backoff">Back-off / retract</label>
+          <span class="pair"><input id="pr-backoff" data-setting="probeBackoff" type="number" step="0.1" min="0.1"><input id="pr-retract" data-setting="probeRetract" type="number" step="0.5" min="0"></span>
+          <label for="pr-zero">Set work Z at contact (= plate)</label><input id="pr-zero" data-setting="probeSetZero" type="checkbox">
+        </div>
+        <div class="buttons three">
+          <button type="button" id="probe-z" class="primary" title="Probe down (G38.2) from here and set work Z">Probe Z</button>
+          <button type="button" id="probe-test-open" title="With nothing touching: checks the probe input reads open">Test: open</button>
+          <button type="button" id="probe-test-closed" title="Hold the clip against the plate/bit: checks the probe input triggers">Test: touching</button>
+        </div>
+        <div id="probe-status" class="muted small"></div>
+      </section>
+
+      <section class="panel" id="panel-heightmap" data-group="probe" hidden>
+        <h2><span>Heightmap</span><span id="hm-name" class="muted small"></span></h2>
+        <form id="hm-form" class="hm-form" autocomplete="off">
+          <span class="lbl">Border X / Y</span><input name="x" type="number" step="0.1"><input name="y" type="number" step="0.1">
+          <span class="lbl">Width / height</span><input name="w" type="number" step="0.1" min="0.1"><input name="h" type="number" step="0.1" min="0.1">
+          <span class="lbl">Origin X / Y</span><input name="originX" type="number" step="0.1"><input name="originY" type="number" step="0.1">
+          <span class="lbl">Points X / Y</span><input name="nx" type="number" step="1" min="2" max="100"><input name="ny" type="number" step="1" min="2" max="100">
+          <span class="lbl">Z top / bottom</span><input name="zTop" type="number" step="0.1"><input name="zBottom" type="number" step="0.1">
+          <span class="lbl">Probe feed</span><input name="feed" type="number" step="1" min="1"><span></span>
+          <span class="lbl">Interp. points X / Y</span><input name="interpNx" type="number" step="1" min="2"><input name="interpNy" type="number" step="1" min="2">
+        </form>
+        <div class="row">
+          <button type="button" id="hm-apply">Apply</button>
+          <label class="file-button" title="Set the border to the cutting area of a G-code file">Auto from file…<input type="file" id="hm-auto-file" accept=".nc,.gcode,.ngc,.tap,.txt,.cnc" hidden></label>
+          <span class="muted small">margin</span><input id="hm-margin" type="number" step="0.5" min="0" value="1" class="narrow">
+        </div>
+        <div class="buttons four">
+          <button type="button" id="hm-probe" class="primary" title="Probe the grid (G38.2 at each point; the origin is probed first as the Z reference)">Probe map</button>
+          <button type="button" id="hm-abort" class="danger" title="Stop probing (hold, then reset; offsets are restored)">Abort</button>
+          <button type="button" id="hm-origin" title="Rapid to the map origin at safe Z">Go origin</button>
+          <button type="button" id="hm-clear" title="Clear all probed values">Clear</button>
+        </div>
+        <div id="hm-progress" class="muted small"></div>
+        <div class="hm-table-wrap"><table class="hm-table mono" id="hm-table"></table></div>
+        <h3 class="sub">Library</h3>
+        <div class="row">
+          <select id="hm-lib" class="grow-input"></select>
+          <button type="button" id="hm-load">Load</button>
+          <button type="button" id="hm-delete" class="link-button">delete</button>
+        </div>
+        <div class="row">
+          <input id="hm-save-name" type="text" placeholder="name" class="grow-input">
+          <button type="button" id="hm-save">Save</button>
+        </div>
+        <div class="row">
+          <label class="file-button">Import .map…<input type="file" id="hm-import" accept=".map,.txt" hidden></label>
+          <a id="hm-export" class="button-like" href="#" download>Export .map</a>
+        </div>
+        <h3 class="sub">Apply to a program</h3>
+        <div class="row">
+          <label class="file-button" title="Compensate a G-code file with this heightmap (done on the server)">Compensate file…<input type="file" id="hm-transform-file" accept=".nc,.gcode,.ngc,.tap,.txt,.cnc" hidden></label>
+          <a id="hm-transform-download" class="button-like" href="#" hidden>Download</a>
+          <label><input type="checkbox" id="hm-preview" checked> show in 3D</label>
+        </div>
+        <div id="hm-transform-info" class="muted small"></div>
+      </section>
+
+      <section class="panel" id="panel-jog" data-group="machine">
+        <h2>
+          <span>Jog</span>
+          <label class="h2-tool" title="One step per key press with the keyboard (arrows, PgUp/PgDn, numpad); holding a key does not repeat. Esc always stops."><input type="checkbox" id="jog-keyboard"> keyboard</label>
+        </h2>
+        <div class="jog">
+          <div class="jog-xy">
+            <button type="button" data-jog="-1,1,0" title="X− Y+">↖</button>
+            <button type="button" data-jog="0,1,0" title="Y+">Y+</button>
+            <button type="button" data-jog="1,1,0" title="X+ Y+">↗</button>
+            <button type="button" data-jog="-1,0,0" title="X−">X−</button>
+            <button type="button" id="jog-stop" class="danger" title="Stop all motion (Esc)">■</button>
+            <button type="button" data-jog="1,0,0" title="X+">X+</button>
+            <button type="button" data-jog="-1,-1,0" title="X− Y−">↙</button>
+            <button type="button" data-jog="0,-1,0" title="Y−">Y−</button>
+            <button type="button" data-jog="1,-1,0" title="X+ Y−">↘</button>
+          </div>
+          <div class="jog-z">
+            <button type="button" data-jog="0,0,1" title="Z+">Z+</button>
+            <button type="button" data-jog="0,0,-1" title="Z−">Z−</button>
+          </div>
+        </div>
+        <div class="jog-step-row">
+          <span class="muted small">Step mm</span>
+          <div class="seg jog-steps" id="jog-steps" role="group" aria-label="Jog step (mm)"></div>
+        </div>
+        <div class="jog-opts">
+          <label>Feed <select id="jog-feed"></select> mm/min</label>
+        </div>
+        <div id="jog-info" class="muted small"></div>
+      </section>
+
+      <section class="panel" id="panel-wcs" data-group="machine">
+        <h2>Coordinates</h2>
+        <div class="seg" id="wcs-select">
+          <button type="button" data-wcs="G54">G54</button><button type="button" data-wcs="G55">G55</button>
+          <button type="button" data-wcs="G56">G56</button><button type="button" data-wcs="G57">G57</button>
+          <button type="button" data-wcs="G58">G58</button><button type="button" data-wcs="G59">G59</button>
+        </div>
+        <div class="buttons five">
+          <button type="button" data-zero="x" title="Set work X = 0 here">X0</button>
+          <button type="button" data-zero="y" title="Set work Y = 0 here">Y0</button>
+          <button type="button" data-zero="z" title="Set work Z = 0 here">Z0</button>
+          <button type="button" data-zero="xy" title="Set work X and Y = 0 here">XY0</button>
+          <button type="button" data-zero="xyz" title="Set work X, Y and Z = 0 here">All 0</button>
+        </div>
+        <div class="row">
+          <label title="Use G92 (temporary, cleared by reset/power cycle) instead of storing in the active G54-G59 (EEPROM)"><input type="checkbox" id="wcs-temp"> temporary (G92)</label>
+          <button type="button" id="g92-clear" class="link-button" title="G92.1">clear G92</button>
+        </div>
+        <div class="buttons three">
+          <button type="button" id="goto-xy0" title="Raise to safe Z if below it, then rapid to work X0 Y0">Go XY0</button>
+          <button type="button" id="goto-z0" title="Rapid to work Z0">Go Z0</button>
+          <button type="button" id="goto-safe" title="Rapid to the safe Z height">Safe Z</button>
+        </div>
+        <div id="wcs-offsets" class="muted small mono"></div>
+      </section>
+
+      <section class="panel" id="panel-spindle" data-group="machine">
+        <h2>Spindle &amp; coolant</h2>
+        <div class="row">
+          <input type="number" id="spindle-rpm" class="mono" min="0" step="1" title="Spindle speed (S)">
+          <input type="range" id="spindle-slider" min="0" max="1000" step="10" title="Spindle speed">
+          <button type="button" id="spindle-toggle" title="M3 / M5">On</button>
+        </div>
+        <div class="row">
+          <label><input type="checkbox" id="coolant-flood"> flood (M8)</label>
+          <label><input type="checkbox" id="coolant-mist"> mist (M7)</label>
+        </div>
+      </section>
+
+      <section class="panel" id="panel-control" data-group="machine">
         <h2>Control</h2>
         <div class="buttons">
           <button type="button" data-rt="hold" title="Feed hold (!) — decelerates to a stop">Hold</button>
@@ -77,8 +220,24 @@
 
     <section class="col-main">
       <section class="panel grow" id="panel-visualizer">
-        <h2>Visualizer</h2>
-        <div class="placeholder muted">3D view arrives in phase 2.</div>
+        <h2>
+          <span>Visualizer</span>
+          <span class="view-tools">
+            <button type="button" data-view="top" title="Top view">Top</button>
+            <button type="button" data-view="front" title="Front view">Front</button>
+            <button type="button" data-view="left" title="Left view">Left</button>
+            <button type="button" data-view="iso" title="Isometric view">Iso</button>
+            <button type="button" id="view-fit" title="Fit everything in view">Fit</button>
+            <button type="button" id="view-persp" title="Toggle perspective / orthographic">Persp</button>
+            <button type="button" id="view-trail-clear" title="Clear the tool trail">Clear trail</button>
+          </span>
+        </h2>
+        <div class="viewport" id="viewport">
+          <canvas id="gl"></canvas>
+          <div class="overlay tl mono small" id="vis-status"></div>
+          <div class="overlay br muted small">drag: rotate · shift/right-drag: pan · wheel: zoom</div>
+          <div class="overlay center muted" id="vis-fallback" hidden>WebGL is not available in this browser.</div>
+        </div>
       </section>
       <section class="panel" id="panel-console">
         <h2>
@@ -104,6 +263,7 @@
       <div class="tabs" role="tablist">
         <button type="button" class="tab active" data-tab="grbl" role="tab">Machine (GRBL)</button>
         <button type="button" class="tab" data-tab="app" role="tab">Application</button>
+        <button type="button" class="tab" data-tab="keys" role="tab">Keyboard</button>
       </div>
       <button class="close" value="close" title="Close">✕</button>
     </form>
@@ -121,6 +281,14 @@
         <button type="button" id="grbl-settings-save" class="primary" disabled>Write changes</button>
       </div>
     </section>
+    <section class="tab-body" data-tab-body="keys" hidden>
+      <p class="muted small">Keyboard jogging must be enabled on the Jog panel. Keys are physical key positions, so they work with any layout. Esc (stop) always works.</p>
+      <table class="settings-table"><tbody id="keymap-body"></tbody></table>
+      <div class="dialog-foot">
+        <span id="keymap-status" class="muted small"></span>
+        <button type="button" id="keymap-reset">Restore defaults</button>
+      </div>
+    </section>
     <section class="tab-body" data-tab-body="app" hidden>
       <form id="app-settings-form" class="form-grid">
         <label for="app-statusInterval">Status query period (ms)</label>
@@ -133,6 +301,26 @@
         <input id="app-autoConnect" name="autoConnect" type="checkbox">
         <label for="app-transcriptStatus">Include status polls in the serial transcript</label>
         <input id="app-transcriptStatus" name="transcriptStatus" type="checkbox">
+        <h3 class="form-head">Jogging &amp; positioning</h3>
+        <label for="app-jogSteps">Jog steps (mm, comma separated)</label>
+        <input id="app-jogSteps" name="jogSteps" type="text" class="mono">
+        <label for="app-jogFeeds">Jog feeds (mm/min, comma separated)</label>
+        <input id="app-jogFeeds" name="jogFeeds" type="text" class="mono">
+        <label for="app-safeZ">Safe Z (work coordinates, mm)</label>
+        <input id="app-safeZ" name="safeZ" type="number" step="0.1">
+        <label for="app-jogLimitsEnabled">Refuse jog steps that would leave a machine-coordinate box<br><span class="muted small">Without homing, machine coordinates start at 0 where the machine was powered on.</span></label>
+        <input id="app-jogLimitsEnabled" name="jogLimitsEnabled" type="checkbox">
+        <span>Jog box X min / max · Y min / max · Z min / max</span>
+        <span class="limits" id="app-jogLimits">
+          <input type="number" step="1" data-i="0"><input type="number" step="1" data-i="1">
+          <input type="number" step="1" data-i="2"><input type="number" step="1" data-i="3">
+          <input type="number" step="1" data-i="4"><input type="number" step="1" data-i="5">
+        </span>
+        <h3 class="form-head">Spindle</h3>
+        <label for="app-spindleMin">Minimum speed (S)</label>
+        <input id="app-spindleMin" name="spindleMin" type="number" min="0" step="1">
+        <label for="app-spindleMax">Maximum speed (S)<br><span class="muted small">GRBL 0.9 default: S1000 = full power ($30 on 1.1).</span></label>
+        <input id="app-spindleMax" name="spindleMax" type="number" min="1" step="1">
       </form>
       <div class="dialog-foot">
         <span id="app-settings-status" class="muted small"></span>

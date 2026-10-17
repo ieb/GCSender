@@ -73,11 +73,11 @@ class Request:
             self._body = self.handler.rfile.read(length) if length else b""
         return self._body
 
-    def json(self) -> Any:
+    def json(self, limit: int = MAX_JSON_BODY) -> Any:
         ctype = (self.header("Content-Type") or "").split(";")[0].strip().lower()
         if ctype != "application/json":
             raise ApiError(415, "Content-Type must be application/json")
-        raw = self.body()
+        raw = self.body(limit)
         if not raw:
             return {}
         try:

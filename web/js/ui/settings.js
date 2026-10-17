@@ -1,6 +1,7 @@
 // Settings dialog: GRBL ($$) editor and application settings.
 
 import { api } from "../api.js";
+import { initKeymapEditor } from "../keymap.js";
 import { $, $$ } from "./dom.js";
 
 export function initTabs(dialog) {
@@ -13,7 +14,10 @@ export function initTabs(dialog) {
   }
 }
 
-const APP_FIELDS = ["statusInterval", "restoreAfterReset", "resetOnConnect", "autoConnect", "transcriptStatus"];
+const APP_FIELDS = [
+  "statusInterval", "restoreAfterReset", "resetOnConnect", "autoConnect", "transcriptStatus",
+  "jogSteps", "jogFeeds", "safeZ", "jogLimitsEnabled", "spindleMin", "spindleMax",
+];
 
 export function initSettings(store) {
   const dlg = $("#dlg-settings");
@@ -23,6 +27,7 @@ export function initSettings(store) {
   const note = $("#grbl-settings-note");
   const edits = new Map(); // id -> number
   initTabs(dlg);
+  initKeymapEditor();
 
   $("#open-settings").addEventListener("click", () => {
     edits.clear();
@@ -145,14 +150,21 @@ export function initSettings(store) {
       if (input.type === "checkbox") input.checked = !!values[key];
       else input.value = values[key] ?? "";
     }
+    const limits = values.jogLimits || [];
+    for (const input of $$("#app-jogLimits input")) input.value = limits[Number(input.dataset.i)] ?? "";
   }
 
   $("#app-settings-save").addEventListener("click", async () => {
     const changes = {};
     for (const key of APP_FIELDS) {
       const input = $(`#app-${key}`);
-      changes[key] = input.type === "checkbox" ? input.checked : Number(input.value);
+      if (input.type === "checkbox") changes[key] = input.checked;
+      else if (input.type === "number") changes[key] = Number(input.value);
+      else changes[key] = input.value;
     }
+    changes.jogLimits = $$("#app-jogLimits input")
+      .sort((a, b) => a.dataset.i - b.dataset.i)
+      .map((i) => Number(i.value));
     try {
       await api.appSettingsWrite(changes);
       $("#app-settings-status").textContent = "Saved.";

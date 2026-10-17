@@ -303,3 +303,97 @@ def test_logs_api(app):
     assert "> G0X1" in text
     assert call(server, "GET", "/api/logs/serial?date=../../x")[0] == 404
     assert call(server, "GET", "/api/logs/app")[0] == 200
+
+
+# ------------------------------------------------------------------ phase 2
+
+
+def test_jog_and_positioning_endpoints(app):
+    server, controller, _bus = app
+    connect(server)
+    wait_for(lambda: controller.model.status and controller.model.status["state"] == "Idle" and controller.model.modal)
+    assert call(server, "POST", "/api/jog/step", {"x": 1, "feed": "fast"})[0] == 400
+    status, body = call(server, "POST", "/api/jog/step", {"x": 1, "feed": 300})
+    assert status == 200 and body["distance"] == 1
+    wait_for(lambda: controller.model.status["mpos"][0] == 1 and controller.model.status["state"] == "Idle")
+
+    for gone in ("/api/jog/start", "/api/jog/heartbeat", "/api/jog/stop"):
+        assert call(server, "POST", gone, {})[0] == 404  # no continuous jogging
+
+    assert call(server, "POST", "/api/wcs/zero", {"axes": [0]})[0] == 400
+    assert call(server, "POST", "/api/wcs/zero", {"axes": {"x": 0, "y": 0}})[0] == 200
+    wait_for(lambda: controller.model.status["wpos"][:2] == [0.0, 0.0])
+    assert call(server, "POST", "/api/wcs/select", {"wcs": "G99"})[0] == 400
+    assert call(server, "POST", "/api/spindle", {"on": "yes"})[0] == 400
+    assert call(server, "POST", "/api/spindle", {"on": True, "rpm": 500})[0] == 200
+    assert call(server, "POST", "/api/coolant", {"flood": True})[0] == 200
+    status, body = call(server, "POST", "/api/goto", {"x": 0, "y": 0})
+    assert status == 200
+    assert call(server, "POST", "/api/stop", {})[0] == 200
+
+
+# ------------------------------------------------------------------ phase 3
+
+
+@pytest.fixture
+def app3(tmp_path):
+    from gcsender.heightmap.model import MapLibrary
+    from gcsender.heightmap.service import HeightmapService
+    from gcsender.probe import Prober
+
+    sim = GrblSimulator("0.9j", time_scale=10.0)
+    bus = EventBus()
+    controller = Controller(bus, lambda port, baud: SimTransport(sim), poll_interval=0.05)
+    maps = HeightmapService(bus, MapLibrary(tmp_path))
+    prober = Prober(controller, maps)
+    router = build_router(bus, controller, simulator="0.9j", maps=maps, prober=prober, sim=sim)
+    server = AppServer(("127.0.0.1", 0), bus=bus, router=router, web_root=WEB_ROOT, token=TOKEN)
+    t = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
+    t.start()
+    yield server, controller, sim
+    server.shutting_down.set()
+    bus.close()
+    server.shutdown()
+    controller.close()
+    server.server_close()
+    sim.close()
+
+
+def test_heightmap_endpoints(app3):
+    server, controller, sim = app3
+    status, hm = call(server, "GET", "/api/heightmap")
+    assert status == 200 and hm["params"]["nx"] == 5 and hm["probed"] == 0
+    assert call(server, "PUT", "/api/heightmap", {"nx": 1})[0] == 409
+    assert call(server, "PUT", "/api/heightmap", {"w": 40, "h": 30, "nx": 3, "ny": 2})[0] == 200
+    cells = [{"i": i, "j": j, "z": 0.01 * j} for i in range(2) for j in range(3)]
+    status, hm = call(server, "PATCH", "/api/heightmap/cells", {"cells": cells})
+    assert status == 200 and hm["complete"]
+    status, text = call(server, "GET", "/api/heightmap/export")
+    assert status == 200 and text.startswith("candle map v3")
+    assert call(server, "POST", "/api/heightmap/import", {"text": "nope"})[0] == 409
+    assert call(server, "POST", "/api/heightmap/import", {"text": text})[0] == 200
+    status, r = call(server, "POST", "/api/heightmap/transform", {"gcode": "G90 G0 X0 Y0 Z0\nG1 X40 F100\n"})
+    assert status == 200 and r["stats"]["segments"] > 1 and "line_map" not in r
+    assert call(server, "POST", "/api/heightmap/library/save", {"name": "../x"})[0] == 409
+    assert call(server, "POST", "/api/heightmap/library/save", {"name": "pcb1"})[0] == 200
+    assert [m["name"] for m in call(server, "GET", "/api/heightmap/library")[1]["maps"]] == ["pcb1"]
+    status, interp = call(server, "GET", "/api/heightmap/interpolated")
+    assert status == 200 and len(interp["grid"]) == 31
+    status, r = call(server, "POST", "/api/heightmap/auto", {"gcode": "G0 X2 Y3 Z1\nG1 Z-1 F10\nG1 X12 Y9\n"})
+    assert status == 200 and r["border"]["w"] == 10
+
+
+def test_probe_endpoints(app3):
+    server, controller, sim = app3
+    connect(server)
+    wait_for(lambda: controller.model.status and controller.model.status["state"] == "Idle" and controller.model.modal)
+    assert call(server, "POST", "/api/probe/test", {"expect": "maybe"})[0] == 400
+    assert call(server, "POST", "/api/sim/probe", {"forced": True})[0] == 200
+    status, r = call(server, "POST", "/api/probe/test", {"expect": "closed"})
+    assert status == 200 and r["ok"]
+    call(server, "POST", "/api/sim/probe", {"forced": None})
+    assert call(server, "POST", "/api/probe/z", {"depth": -1})[0] == 400
+    status, r = call(server, "POST", "/api/probe/z", {"depth": 40, "fastFeed": 500, "retract": 1})
+    assert status == 200 and r == {"started": "z"}
+    assert call(server, "POST", "/api/command", {"line": "G0 X1"})[0] == 409  # busy probing
+    wait_for(lambda: call(server, "GET", "/api/probe")[1]["state"] == "done", timeout=20)

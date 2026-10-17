@@ -380,7 +380,11 @@ class GrblSimulator:
         c = self.persist.coords[self.modal.wcs]
         return [c[0] + self.g92[0], c[1] + self.g92[1], c[2] + self.g92[2] + self.modal.tlo]
 
+    probe_forced: bool | None = None  # test hook: force the probe input closed/open
+
     def probe_pin(self) -> bool:
+        if self.probe_forced is not None:
+            return self.probe_forced
         return self.pos[2] <= self.surface(self.pos[0], self.pos[1])
 
     def _current_rate(self) -> float:
@@ -817,7 +821,10 @@ class GrblSimulator:
             if vals["F"] < 0:
                 raise SimError(4)
             if not jog:
-                m.feed = self._to_mm(vals["F"]) if m.feedmode == 94 else vals["F"]
+                # The block's own G20/G21 applies to its F word.
+                units = 20 if "20" in gs else 21 if "21" in gs else m.units
+                inverse = "93" in gs or (m.feedmode == 93 and "94" not in gs)
+                m.feed = vals["F"] if inverse else vals["F"] * (25.4 if units == 20 else 1.0)
         if "S" in vals:
             if vals["S"] < 0:
                 raise SimError(4)

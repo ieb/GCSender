@@ -6,13 +6,21 @@ over HTTP and server-sent events, so reloading or closing the page never interru
 
 See [docs/PLAN.md](docs/PLAN.md) for the full plan, feature inventory and phases.
 
-**Status:** phases 0–1 are complete, verified on the simulator only; the hardware check is still deferred.
+**Status:** phases 0–3 are complete, verified on the simulator only; the hardware check is still deferred.
 - Working: connection and firmware detection (fresh boot or re-attach), live status, and the console with error help.
 - Control: Hold, Resume, Reset (with offset and parser-state restore), Unlock and Check.
+- Jogging: step only. Each click or key press moves exactly 0.01, 0.05, 0.1, 0.5, 1, 5 or 10 mm. A long press is always one step (no auto-repeat), and there is no hold-to-move mode. Keys are remappable and Esc stops. There is an optional jog box.
+- Coordinates: G54–G59 select/zero, G92, and go-to with safe Z. Spindle and coolant controls.
+- Probing: Z probe (plate, two-stage), probe-input test for GRBL 0.9.
+- Heightmaps: probe a grid, edit values, save/load a library, import/export Candle `.map` files, and compensate a G-code file on the server (download and 3D preview).
+- 3D view: grid, axes, tool and trail, heightmap surface and the compensated path, with orbit/pan/zoom and preset views.
 - Settings: GRBL `$$` editor with warnings for `$10`/`$13`, and app settings.
 - Logs: application log and serial transcripts.
 
-Jogging, probing, heightmaps and jobs come in later phases.
+Job upload and streaming come in phase 4.
+
+**Jogging is step only, by design.** Continuous (hold-to-move) jogging is deliberately not provided: GRBL 0.9 cannot cancel a jog,
+so any overrun would go into the workpiece. Separate presses queue and run in order; holding a key or button never produces more than one step.
 
 ## Requirements
 - Python ≥ 3.11 and [uv](https://docs.astral.sh/uv/)

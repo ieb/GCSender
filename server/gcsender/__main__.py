@@ -12,6 +12,9 @@ from .api import SIM_PORT, build_router
 from .controller import Controller, ControllerError
 from .events import EventBus
 from .logs import LogRing, Transcript
+from .heightmap.model import MapLibrary
+from .heightmap.service import HeightmapService
+from .probe import Prober
 from .simulator import GrblSimulator
 from .store import SettingsStore
 from .transport import SerialTransport, SimTransport, Transport
@@ -71,7 +74,12 @@ def main(argv: list[str] | None = None) -> int:
     transcript = Transcript(state_dir / "logs")
     bus = EventBus()
     controller = Controller(bus, make_transport, settings=settings, transcript=transcript)
-    router = build_router(bus, controller, simulator=args.simulate, transcript=transcript, log_ring=log_ring)
+    maps = HeightmapService(bus, MapLibrary(state_dir))
+    prober = Prober(controller, maps)
+    router = build_router(
+        bus, controller, simulator=args.simulate, transcript=transcript, log_ring=log_ring,
+        maps=maps, prober=prober, sim=sim,
+    )
     lan = args.lan or host not in ("127.0.0.1", "localhost", "::1")
     try:
         server = AppServer(
