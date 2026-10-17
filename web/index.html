@@ -60,6 +60,36 @@
         <button type="button" class="tab" data-left-tab="probe" role="tab">Probe &amp; heightmap</button>
       </nav>
 
+      <section class="panel sim-panel" id="panel-sim" data-group="probe" data-unavailable hidden>
+        <h2><span>Simulator · virtual surface</span><span class="muted small">simulate mode only</span></h2>
+        <p class="muted small">The simulated probe input closes when the tool tip reaches this surface (machine coordinates).</p>
+        <div class="row">
+          <select id="sim-preset" class="grow-input" title="Start from a preset"></select>
+          <button type="button" id="sim-preset-apply">Use preset</button>
+        </div>
+        <form id="sim-form" class="hm-form" autocomplete="off">
+          <span class="lbl">Height (machine Z)</span><input name="base" type="number" step="0.5"><span></span>
+          <span class="lbl">Tilt X / Y (mm per 100 mm)</span><input name="tiltX" data-scale="100" type="number" step="0.05"><input name="tiltY" data-scale="100" type="number" step="0.05">
+          <span class="lbl">Warp X amplitude / period</span><input name="ampX" type="number" step="0.05"><input name="periodX" type="number" step="5" min="1">
+          <span class="lbl">Warp Y amplitude / period</span><input name="ampY" type="number" step="0.05"><input name="periodY" type="number" step="5" min="1">
+          <span class="lbl">Bump height / radius</span><input name="bump" type="number" step="0.05"><input name="bumpRadius" type="number" step="1" min="0.5">
+          <span class="lbl">Bump centre X / Y</span><input name="bumpX" type="number" step="1"><input name="bumpY" type="number" step="1">
+        </form>
+        <div class="row">
+          <button type="button" id="sim-apply">Apply surface</button>
+          <span class="muted small">Probe input</span>
+          <div class="seg sim-pin" id="sim-pin" role="group" aria-label="Simulated probe input">
+            <button type="button" data-pin="auto" title="Closed when the tool touches the virtual surface">auto</button>
+            <button type="button" data-pin="touching" title="Forced closed, as if the clip were held to the plate">touching</button>
+            <button type="button" data-pin="open" title="Forced open: the probe never triggers">open</button>
+          </div>
+        </div>
+        <div class="row">
+          <span id="sim-readout" class="muted small mono grow-input"></span>
+          <button type="button" id="sim-goto" title="G53 G0 to 5 mm above the virtual surface at the current XY">5 mm above surface</button>
+        </div>
+      </section>
+
       <section class="panel" id="panel-probe" data-group="probe" hidden>
         <h2>Z probe</h2>
         <div class="form-grid compact" id="probe-form">

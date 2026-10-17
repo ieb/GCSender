@@ -12,6 +12,7 @@ from . import operations as ops
 from .heightmap.model import MapError
 from .heightmap.service import HeightmapService
 from .probe import Prober
+from .simulator import SURFACE_PRESETS, SurfaceParams
 from .logs import LogRing, Transcript
 from .store import SettingsError
 from .transport import list_serial_ports
@@ -299,14 +300,52 @@ def build_router(
             return result
         return {"gcode": result["gcode"], "stats": result["stats"]}
 
-    def sim_probe(req: Request) -> Any:
+    # -- simulator (only with --simulate) ----------------------------------------
+
+    def _sim() -> Any:
         if sim is None:
             raise ApiError(404, "simulator not enabled")
+        return sim
+
+    def sim_state() -> dict[str, Any]:
+        s = _sim()
+        surface = s.surface.to_dict() if isinstance(s.surface, SurfaceParams) else None
+        return {
+            "firmware": simulator,
+            "surface": surface,
+            "presets": sorted(SURFACE_PRESETS),
+            "probeForced": s.probe_forced,
+        }
+
+    def publish_sim() -> dict[str, Any]:
+        state = sim_state()
+        bus.publish("sim", state, retain=True)
+        return state
+
+    def sim_get(_req: Request) -> Any:
+        return sim_state()
+
+    def sim_probe(req: Request) -> Any:
         forced = req.json().get("forced")
         if forced is not None and not isinstance(forced, bool):
             raise ApiError(400, "forced must be true, false or null")
-        sim.probe_forced = forced
-        return {"forced": forced}
+        _sim().probe_forced = forced
+        return publish_sim()
+
+    def sim_surface(req: Request) -> Any:
+        s = _sim()
+        body = req.json()
+        if not isinstance(body, dict):
+            raise ApiError(400, "body must be an object")
+        current = s.surface if isinstance(s.surface, SurfaceParams) else SurfaceParams()
+        try:
+            s.surface = current.updated(body)
+        except ValueError as e:
+            raise ApiError(400, str(e)) from None
+        return publish_sim()
+
+    if sim is not None:
+        publish_sim()
 
     # -- GRBL settings ($$) ---------------------------------------------------
 
@@ -400,7 +439,9 @@ def build_router(
     add("POST", "/api/heightmap/library/delete", hm_delete)
     add("POST", "/api/heightmap/origin", hm_origin)
     add("POST", "/api/heightmap/transform", hm_transform)
+    add("GET", "/api/sim", sim_get)
     add("POST", "/api/sim/probe", sim_probe)
+    add("PUT", "/api/sim/surface", sim_surface)
     add("GET", "/api/grbl/settings", grbl_settings)
     add("PUT", "/api/grbl/settings", grbl_settings_put)
     add("POST", "/api/grbl/settings/refresh", grbl_settings_refresh)

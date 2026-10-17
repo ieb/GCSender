@@ -439,7 +439,7 @@ GET  /api/logs/serial          transcript download
 
 ## 10. Testing
 - **Simulator** (`--simulate 0.9j|1.1f`):
-  - Models: the 128-byte RX buffer, 80-character line limit, planner depth (18 blocks on 0.9j, 16 on 1.1f) and timing, states, `$10` formats, `$$`/`$#`/`$G`, G38.x against a configurable surface `z(x,y)` with probe fail, hold/reset semantics including the alarm cases, and the banner on open (reset vs no-reset mode).
+  - Models: the 128-byte RX buffer, 80-character line limit, planner depth (18 blocks on 0.9j, 16 on 1.1f) and timing, states, `$10` formats, `$$`/`$#`/`$G`, G38.x against a configurable virtual surface `z(x,y)` (height, tilt, warp, bump, and presets; set with `--sim-surface` or the simulate-only Simulator panel / `GET /api/sim`, `PUT /api/sim/surface`, `POST /api/sim/probe {forced}`) with probe fail, hold/reset semantics including the alarm cases, and the banner on open (reset vs no-reset mode).
   - Lets every phase run end-to-end without the machine.
 - **pytest:** protocol parsing (fixtures from real 0.9j/1.1 transcripts), streamer budget and correlation, exact jog steps, stop sequence, heightmap interpolation and transform (golden files), `.map` round-trip, the SSE replay/snapshot boundary, and the auth checks.
 - **SPA:** `web/tests.html` for the display parser and view math, run in the browser.

@@ -30,7 +30,7 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Callable
+from typing import Any, Callable
 
 RX_BUFFER_SIZE = 128  # one slot always free in GRBL's ring buffer -> 127 usable
 LINE_BUFFER_SIZE = 80
@@ -90,9 +90,101 @@ def default_settings(firmware: str) -> dict[int, float]:
     return s
 
 
+@dataclass
+class SurfaceParams:
+    """Virtual workpiece surface probed by the simulator (machine coordinates, mm).
+
+    z(x, y) = base + tiltX*x + tiltY*y
+              + ampX*sin(2*pi*x/periodX) + ampY*cos(2*pi*y/periodY)
+              + bump * exp(-((x-bumpX)^2 + (y-bumpY)^2) / (2*bumpRadius^2))
+    Tilts are in mm per mm (0.005 = 0.5 mm over 100 mm).
+    """
+
+    base: float = -30.0
+    tiltX: float = 0.0008
+    tiltY: float = 0.0
+    ampX: float = 0.15
+    periodX: float = 50 * math.pi  # ~157 mm
+    ampY: float = 0.10
+    periodY: float = 36 * math.pi  # ~113 mm
+    bump: float = 0.0
+    bumpX: float = 20.0
+    bumpY: float = 15.0
+    bumpRadius: float = 8.0
+
+    LIMITS = {
+        "base": (-500.0, 500.0), "tiltX": (-0.2, 0.2), "tiltY": (-0.2, 0.2),
+        "ampX": (-10.0, 10.0), "periodX": (1.0, 10000.0), "ampY": (-10.0, 10.0), "periodY": (1.0, 10000.0),
+        "bump": (-10.0, 10.0), "bumpX": (-1000.0, 1000.0), "bumpY": (-1000.0, 1000.0), "bumpRadius": (0.5, 1000.0),
+    }
+
+    def __call__(self, x: float, y: float) -> float:
+        z = self.base + self.tiltX * x + self.tiltY * y
+        z += self.ampX * math.sin(2 * math.pi * x / self.periodX) + self.ampY * math.cos(2 * math.pi * y / self.periodY)
+        if self.bump:
+            d2 = (x - self.bumpX) ** 2 + (y - self.bumpY) ** 2
+            z += self.bump * math.exp(-d2 / (2 * self.bumpRadius ** 2))
+        return z
+
+    def to_dict(self) -> dict[str, float]:
+        return {k: getattr(self, k) for k in self.LIMITS}
+
+    def updated(self, changes: dict[str, Any]) -> "SurfaceParams":
+        """New params with ``changes`` applied (a ``preset`` key is applied first)."""
+        base = dict(self.to_dict())
+        preset = changes.get("preset")
+        if preset is not None:
+            if preset not in SURFACE_PRESETS:
+                raise ValueError(f"unknown surface preset {preset!r}; choose from {', '.join(SURFACE_PRESETS)}")
+            base = {**SurfaceParams().to_dict(), **SURFACE_PRESETS[preset]}
+        for k, v in changes.items():
+            if k == "preset":
+                continue
+            if k not in self.LIMITS:
+                raise ValueError(f"unknown surface parameter {k!r}")
+            if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
+                raise ValueError(f"{k} must be a number")
+            lo, hi = self.LIMITS[k]
+            if not lo <= v <= hi:
+                raise ValueError(f"{k} must be between {lo:g} and {hi:g}")
+            base[k] = float(v)
+        return SurfaceParams(**base)
+
+
+# Values not listed fall back to SurfaceParams defaults ("gentle" = the defaults).
+SURFACE_PRESETS: dict[str, dict[str, float]] = {
+    "gentle": {},
+    "flat": {"tiltX": 0.0, "tiltY": 0.0, "ampX": 0.0, "ampY": 0.0},
+    "tilted": {"tiltX": 0.005, "tiltY": -0.003, "ampX": 0.0, "ampY": 0.0},  # 0.5 / -0.3 mm per 100 mm
+    "bent": {"tiltX": 0.0, "ampX": 0.6, "periodX": 120.0, "ampY": 0.4, "periodY": 90.0},
+    "bump": {"tiltX": 0.0, "ampX": 0.0, "ampY": 0.0, "bump": 0.5, "bumpX": 20.0, "bumpY": 15.0, "bumpRadius": 8.0},
+}
+
+
+def parse_surface_spec(spec: str) -> SurfaceParams:
+    """CLI form: ``preset=bent,base=-25,tiltX=0.002`` (any subset)."""
+    changes: dict[str, Any] = {}
+    for part in filter(None, (p.strip() for p in spec.split(","))):
+        key, sep, value = part.partition("=")
+        if not sep:
+            raise ValueError(f"expected key=value, got {part!r}")
+        key = key.strip()
+        if key == "preset":
+            changes[key] = value.strip()
+        else:
+            try:
+                changes[key] = float(value)
+            except ValueError:
+                raise ValueError(f"{key} must be a number") from None
+    return SurfaceParams().updated(changes)
+
+
 def default_surface(x: float, y: float) -> float:
-    """Machine-coordinate Z of the simulated workpiece surface (gentle warp)."""
-    return -30.0 + 0.15 * math.sin(x / 25.0) + 0.10 * math.cos(y / 18.0) + 0.0008 * x
+    """Machine-coordinate Z of the default simulated workpiece surface (gentle warp)."""
+    return _DEFAULT_SURFACE(x, y)
+
+
+_DEFAULT_SURFACE = SurfaceParams()
 
 
 def _fmt(v: float, decimals: int = 3) -> str:
@@ -167,7 +259,7 @@ class GrblSimulator:
         firmware: str = "0.9j",
         *,
         time_scale: float = 1.0,
-        surface: Callable[[float, float], float] = default_surface,
+        surface: Callable[[float, float], float] | None = None,
         tick: float = 0.005,
         boot_delay: float = 0.0,
         threaded: bool = True,
@@ -178,7 +270,7 @@ class GrblSimulator:
         self.v11 = firmware == "1.1f"
         self.planner_size = 15 if self.v11 else 17  # usable blocks
         self.time_scale = time_scale
-        self.surface = surface
+        self.surface = surface if surface is not None else SurfaceParams()
         self.boot_delay = boot_delay
         self.on_output: Callable[[str], None] = lambda line: None
         self.rx_overflows = 0

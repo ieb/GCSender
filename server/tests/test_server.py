@@ -397,3 +397,24 @@ def test_probe_endpoints(app3):
     assert status == 200 and r == {"started": "z"}
     assert call(server, "POST", "/api/command", {"line": "G0 X1"})[0] == 409  # busy probing
     wait_for(lambda: call(server, "GET", "/api/probe")[1]["state"] == "done", timeout=20)
+
+
+def test_sim_endpoints(app3):
+    server, controller, sim = app3
+    status, s = call(server, "GET", "/api/sim")
+    assert status == 200 and s["surface"]["base"] == -30 and "bent" in s["presets"] and s["probeForced"] is None
+    assert call(server, "GET", "/api/state")[1]["retained"]["sim"]["firmware"] == "0.9j"
+    status, s = call(server, "PUT", "/api/sim/surface", {"preset": "flat", "base": -20})
+    assert status == 200 and s["surface"]["base"] == -20 and s["surface"]["ampX"] == 0
+    assert sim.surface(37, -4) == -20
+    assert call(server, "PUT", "/api/sim/surface", {"tiltX": 3})[0] == 400
+    assert call(server, "PUT", "/api/sim/surface", {"preset": "nope"})[0] == 400
+    status, s = call(server, "POST", "/api/sim/probe", {"forced": False})
+    assert status == 200 and s["probeForced"] is False and sim.probe_forced is False
+    assert call(server, "GET", "/api/state")[1]["retained"]["sim"]["probeForced"] is False
+
+
+def test_sim_endpoints_absent_without_simulator(app):
+    server, _controller, _bus = app
+    assert call(server, "GET", "/api/sim")[0] == 404
+    assert "sim" not in call(server, "GET", "/api/state")[1]["retained"]

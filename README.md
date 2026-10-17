@@ -48,6 +48,18 @@ Then open the printed URL (default <http://127.0.0.1:8080/>).
 | `--allow-host NAME` | Extra `Host` name to accept (e.g. a DNS name for the machine) |
 | `--simulate 0.9j\|1.1f` | Provide a simulated controller as port `sim` |
 | `--sim-no-reset`, `--sim-speed X` | Simulator: no reset when the port opens / time scale |
+| `--sim-surface SPEC` | Simulator: the virtual workpiece that the probe touches, e.g. `preset=bent` or `base=-25,tiltX=0.005,bump=0.4` |
+
+### Probing in the simulator
+The simulator has a virtual workpiece surface. Its probe input closes when the tool tip reaches the surface, so `G38.2`, Z probing and heightmaps work without hardware.
+- **Default:** about 30 mm below where the simulator starts, in machine coordinates, with a gentle 0.3 mm warp.
+- **Where to change it:** the **Simulator · virtual surface** panel in the *Probe & heightmap* tab (shown only with `--simulate`), or `--sim-surface` at start-up.
+- **What you can set:** height, tilt X/Y, warp amplitude/period in X and Y, and a bump (height, radius, centre).
+- **Presets:** `gentle`, `flat`, `tilted`, `bent`, `bump`.
+- **Probe input:** `auto` (follows the surface), `touching` (as if the clip is held to the plate) or `open`.
+- **Readout:** the surface height under the tool. **5 mm above surface** moves there, ready for *Probe Z*.
+
+A quick tour: *5 mm above surface* → *Probe Z* → set a map border → *Probe map*. Add `--sim-speed 10` to make it ten times faster.
 | `--state-dir DIR` | Settings and serial transcripts (default `~/.gcsender`) |
 
 ## Security

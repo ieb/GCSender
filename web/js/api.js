@@ -89,6 +89,8 @@ export const api = {
   heightmapDelete: (name) => request("POST", "/api/heightmap/library/delete", { name }),
   heightmapOrigin: () => request("POST", "/api/heightmap/origin", {}),
   heightmapTransform: (gcode) => request("POST", "/api/heightmap/transform", { gcode }),
+  simProbe: (forced) => request("POST", "/api/sim/probe", { forced }),
+  simSurface: (changes) => request("PUT", "/api/sim/surface", changes),
 };
 
 export function heightmapExportUrl() {

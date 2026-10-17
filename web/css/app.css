@@ -324,6 +324,9 @@ input.narrow { width: 56px; }
 .hm-table td.empty input { color: var(--muted); }
 .hm-table td.last { outline: 2px solid var(--accent); }
 #probe-status.error, #hm-progress.error { color: var(--danger); }
+.sim-panel { border-style: dashed; }
+.seg.sim-pin { grid-template-columns: repeat(3, auto); }
+.seg.sim-pin button { padding: 2px 8px; font-size: 12px; }
 #hm-name { text-transform: none; letter-spacing: 0; font-weight: normal; }
 #hm-transform-info { white-space: pre-line; }
 

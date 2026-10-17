@@ -23,7 +23,7 @@ export function initLeftTabs() {
   function select(name) {
     localStorage.setItem(TAB_KEY, name);
     for (const t of tabs) t.classList.toggle("active", t.dataset.leftTab === name);
-    for (const p of $$(".col-left [data-group]")) p.hidden = p.dataset.group !== name;
+    for (const p of $$(".col-left [data-group]")) p.hidden = p.dataset.group !== name || p.hasAttribute("data-unavailable");
   }
   for (const t of tabs) t.addEventListener("click", () => select(t.dataset.leftTab));
   select(localStorage.getItem(TAB_KEY) || "machine");

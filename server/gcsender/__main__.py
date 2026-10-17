@@ -15,7 +15,7 @@ from .logs import LogRing, Transcript
 from .heightmap.model import MapLibrary
 from .heightmap.service import HeightmapService
 from .probe import Prober
-from .simulator import GrblSimulator
+from .simulator import GrblSimulator, parse_surface_spec
 from .store import SettingsStore
 from .transport import SerialTransport, SimTransport, Transport
 from .webserver import AppServer
@@ -34,6 +34,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--simulate", choices=["0.9j", "1.1f"], help="provide a simulated GRBL controller as port 'sim'")
     p.add_argument("--sim-no-reset", action="store_true", help="simulated board does not reset when the port opens")
     p.add_argument("--sim-speed", type=float, default=1.0, help="simulator time scale (default 1.0 = real time)")
+    p.add_argument(
+        "--sim-surface",
+        default="",
+        metavar="SPEC",
+        help="virtual workpiece surface for probing, e.g. 'preset=bent' or 'base=-25,tiltX=0.005'. "
+        "Presets: gentle (default), flat, tilted, bent, bump. Keys: base, tiltX, tiltY, ampX, periodX, "
+        "ampY, periodY, bump, bumpX, bumpY, bumpRadius (machine coordinates, mm; tilts in mm/mm)",
+    )
     p.add_argument("--state-dir", type=Path, default=DEFAULT_STATE_DIR,
                    help=f"settings, logs and (later) jobs/heightmaps (default {DEFAULT_STATE_DIR})")
     p.add_argument("--web-root", type=Path, default=DEFAULT_WEB_ROOT, help=argparse.SUPPRESS)
@@ -60,7 +68,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"invalid --http address: {args.http}", file=sys.stderr)
         return 2
 
-    sim = GrblSimulator(args.simulate, time_scale=args.sim_speed, boot_delay=0.5) if args.simulate else None
+    sim = None
+    if args.simulate:
+        try:
+            surface = parse_surface_spec(args.sim_surface)
+        except ValueError as e:
+            print(f"invalid --sim-surface: {e}", file=sys.stderr)
+            return 2
+        sim = GrblSimulator(args.simulate, time_scale=args.sim_speed, boot_delay=0.5, surface=surface)
 
     def make_transport(port: str, baud: int) -> Transport:
         if port == SIM_PORT:

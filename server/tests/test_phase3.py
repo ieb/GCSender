@@ -446,3 +446,48 @@ def test_heightmap_probe_refused_unless_idle(rig):
     wait_for(lambda: ctl.model.status["state"] == "Run")
     with pytest.raises(ControllerError, match="Idle"):
         prober.probe_map()
+
+
+# ------------------------------------------------------------ virtual surface
+
+
+def test_surface_presets_validation_and_cli_spec():
+    from gcsender.simulator import SURFACE_PRESETS, SurfaceParams, parse_surface_spec
+
+    assert SurfaceParams()(10, 10) == pytest.approx(default_surface(10, 10))
+    tilted = SurfaceParams().updated({"preset": "tilted"})
+    assert tilted(100, 0) - tilted(0, 0) == pytest.approx(0.5)  # 0.5 mm per 100 mm
+    bump = SurfaceParams().updated({"preset": "bump"})
+    assert bump(20, 15) - bump.base == pytest.approx(0.5) and bump(80, 80) == pytest.approx(bump.base)
+    flat = SurfaceParams().updated({"preset": "flat", "base": -12})
+    assert flat(3, 4) == flat(70, -20) == -12
+    assert set(SURFACE_PRESETS) >= {"gentle", "flat", "tilted", "bent", "bump"}
+    spec = parse_surface_spec("preset=bent, base=-25,tiltY=0.002")
+    assert (spec.base, spec.tiltY, spec.ampX) == (-25, 0.002, 0.6)
+    for bad in ("tiltX=1", "preset=nope", "warp=1", "base", "base=abc"):
+        with pytest.raises(ValueError):
+            parse_surface_spec(bad)
+
+
+def test_cli_rejects_bad_surface_spec(capsys):
+    from gcsender.__main__ import main
+
+    assert main(["--simulate", "0.9j", "--sim-surface", "tiltX=9", "--http", "127.0.0.1:0"]) == 2
+    assert "invalid --sim-surface" in capsys.readouterr().err
+
+
+def test_heightmap_probe_on_a_tilted_bumpy_surface(rig):
+    from gcsender.simulator import SurfaceParams
+
+    sim, ctl, maps, prober = rig()
+    surf = SurfaceParams().updated({"preset": "tilted", "bump": 0.4, "bumpX": 20, "bumpY": 15, "bumpRadius": 6})
+    sim.surface = surf
+    setup_map(ctl, maps, sim, nx=6, ny=5)
+    prober.probe_map()
+    assert finished(prober)["state"] == "done"
+    ref = surf(0, 0)
+    hm = maps.hm
+    for i in range(5):
+        for j in range(6):
+            x, y = hm.params.point(i, j)
+            assert hm.values[i][j] == pytest.approx(surf(x, y) - ref, abs=0.002)
