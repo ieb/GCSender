@@ -9,6 +9,7 @@ export function initWcs(store, log) {
   const report = (p) => p.catch((e) => log(e.message));
 
   for (const b of $$("#wcs-select [data-wcs]")) {
+    b.dataset.base = b.title; // the static explanation; render() appends the stored offset
     b.addEventListener("click", () => report(api.wcsSelect(b.dataset.wcs)));
   }
   for (const b of $$("#panel-wcs [data-zero]")) {
@@ -30,8 +31,15 @@ export function initWcs(store, log) {
     const idle = connected && store.state.status && store.state.status.state === "Idle";
     const wcs = (store.state.modal && store.state.modal.wcs) || null;
     for (const b of $$("#panel-wcs button")) b.disabled = !idle;
-    for (const b of $$("#wcs-select [data-wcs]")) b.classList.toggle("active", b.dataset.wcs === wcs);
     const o = store.state.offsets || {};
+    for (const b of $$("#wcs-select [data-wcs]")) {
+      b.classList.toggle("active", b.dataset.wcs === wcs);
+      const v = o[b.dataset.wcs];
+      const stored = Array.isArray(v)
+        ? `Stored zero (machine coordinates): X ${fmt(v[0])}  Y ${fmt(v[1])}  Z ${fmt(v[2])}`
+        : "Stored zero: not read yet (connect, or press $#)";
+      b.title = `${b.dataset.base}\n${stored}${b.dataset.wcs === wcs ? "\n(active now)" : ""}`;
+    }
     const parts = [];
     if (wcs && Array.isArray(o[wcs])) parts.push(`${wcs} ${o[wcs].map((v) => fmt(v)).join(", ")}`);
     if (Array.isArray(o.G92) && o.G92.some((v) => Math.abs(v) > 1e-9)) parts.push(`G92 ${o.G92.map((v) => fmt(v)).join(", ")}`);

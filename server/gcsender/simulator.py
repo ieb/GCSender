@@ -380,6 +380,9 @@ class GrblSimulator:
             self._soft_reset()
             return True
         if not self.v11:
+            if ch == "@":  # GRBL 0.9 safety door
+                self._door()
+                return True
             return False
         if b == 0x85:
             if self.state == "Jog":
@@ -387,10 +390,7 @@ class GrblSimulator:
                 self.hold_left = HOLD_DECEL_S
             return True
         if b == 0x84:
-            if self.state not in ("Alarm", "Sleep"):
-                self.state = "Door"
-                self.hold = True
-                self.hold_left = HOLD_DECEL_S if self.planner else 0.0
+            self._door()
             return True
         if 0x90 <= b <= 0xA1:
             self._override(b)
@@ -417,6 +417,13 @@ class GrblSimulator:
             self.modal.coolant = "M9" if self.modal.coolant == "M8" else "M8"
         elif b == 0xA1:
             self.modal.coolant = "M9" if self.modal.coolant == "M7" else "M7"
+
+    def _door(self) -> None:
+        """Safety door: a feed hold reported as Door; cycle start resumes."""
+        if self.state not in ("Alarm", "Sleep"):
+            self.state = "Door"
+            self.hold = True
+            self.hold_left = HOLD_DECEL_S if self.planner else 0.0
 
     def _feed_hold(self) -> None:
         if self.state == "Jog":

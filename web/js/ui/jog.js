@@ -6,7 +6,7 @@
 // only after it has been released.
 
 import { api } from "../api.js";
-import { actionFor, AXIS_ACTIONS } from "../keymap.js";
+import { actionFor, AXIS_ACTIONS, runAction } from "../keymap.js";
 import { $, $$ } from "./dom.js";
 
 const KB_KEY = "gcs-jog-keyboard";
@@ -135,7 +135,8 @@ export function initJog(store, log) {
       }
       return;
     }
-    if (!kb.checked || !connected || isTyping(e.target) || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (!kb.checked || isTyping(e.target) || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (!connected && !/^view|^console$/.test(action)) return; // view/console shortcuts work offline
     e.preventDefault();
     // A held key is one step: ignore auto-repeat, including platforms/remote
     // desktops that send repeats without the repeat flag.
@@ -146,6 +147,7 @@ export function initJog(store, log) {
     else if (action === "step-") cycleStep(-1);
     else if (action === "feed+") cycleFeed(1);
     else if (action === "feed-") cycleFeed(-1);
+    else runAction(action);
   });
 
   // -- state -------------------------------------------------------------------

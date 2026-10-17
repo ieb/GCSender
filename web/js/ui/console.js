@@ -3,6 +3,7 @@
 
 import { api } from "../api.js";
 import { $ } from "./dom.js";
+import { registerAction } from "../keymap.js";
 
 const HISTORY_KEY = "gcs-console-history";
 const FILTER_KEY = "gcs-console-filters";
@@ -130,6 +131,10 @@ export function initConsole(store) {
   });
 
   $("#console-clear").addEventListener("click", () => out.replaceChildren());
+  registerAction("console", () => {
+    document.querySelector('[data-bottom="console"]')?.click();
+    input.focus();
+  });
 
   renderAll();
   return local;

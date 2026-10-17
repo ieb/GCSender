@@ -6,9 +6,9 @@ over HTTP and server-sent events, so reloading or closing the page never interru
 
 See [docs/PLAN.md](docs/PLAN.md) for the full plan, feature inventory and phases.
 
-**Status:** phases 0–5 are complete, verified on the simulator only; the hardware check is still deferred.
+**Status:** phases 0–6 are complete, verified on the simulator only; the hardware check is still deferred.
 - Working: connection and firmware detection (fresh boot or re-attach), live status, and the console with error help.
-- Control: Hold, Resume, Reset (with offset and parser-state restore), Unlock and Check.
+- Control: Hold, Resume, Door, Reset (with offset and parser-state restore), Unlock and Check.
 - Jogging: step only. Each click or key press moves exactly 0.01, 0.05, 0.1, 0.5, 1, 5 or 10 mm. A long press is always one step (no auto-repeat), and there is no hold-to-move mode. Keys are remappable and Esc stops. There is an optional jog box.
 - Coordinates: G54–G59 select/zero, G92, and go-to with safe Z. Spindle and coolant controls.
 - Probing: Z probe (plate, two-stage), probe-input test for GRBL 0.9.
@@ -18,10 +18,11 @@ See [docs/PLAN.md](docs/PLAN.md) for the full plan, feature inventory and phases
 - User commands: buttons for server-run macros with `{wx}`/`{prbz}`-style values, simple arithmetic and `wait idle`.
 - Notifications: desktop notifications and a marked tab title when a job finishes or needs you while the tab is in the background (🔔 in the top bar).
 - 3D view: grid, axes, tool and trail, the program (feed, rapids, plunges) coloured by progress, start/end markers and the selected line, the heightmap surface, and the compensated path, with orbit/pan/zoom and preset views.
-- Settings: GRBL `$$` editor with warnings for `$10`/`$13`, and app settings.
+- Settings: GRBL `$$` editor with warnings for `$10`/`$13` and a `$$` backup download; app settings with defaults, named profiles and export/import; remappable shortcuts (including hold, resume, job pause, views and user commands 1–9).
+- Display: light/dark/system theme, toolpath colours and 3D options, collapsible panels and draggable dividers (with a layout lock), larger touch targets on tablets, and a Help dialog. Works on desktop and tablet widths.
 - Logs: application log and serial transcripts.
 
-Next: phase 6 (polish: settings profiles, shortcut editor, layout, theme, help).
+All planned phases are done; what remains is the deferred hardware checks listed in [docs/PLAN.md](docs/PLAN.md) §11, then the *Later* backlog.
 
 **Jogging is step only, by design.** Continuous (hold-to-move) jogging is deliberately not provided: GRBL 0.9 cannot cancel a jog,
 so any overrun would go into the workpiece. Separate presses queue and run in order; holding a key or button never produces more than one step.

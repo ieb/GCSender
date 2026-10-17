@@ -2,6 +2,7 @@
 
 import { api } from "../api.js";
 import { $ } from "./dom.js";
+import { registerAction } from "../keymap.js";
 
 const BLOCKING = new Set(["starting", "running", "paused", "error"]);
 
@@ -20,7 +21,7 @@ export function initMacros(store, log) {
       const b = document.createElement("button");
       b.type = "button";
       b.textContent = m.name;
-      b.title = m.text;
+      b.title = `Run user command “${m.name}” on the server:\n${m.text}`;
       b.classList.toggle("running", run.running === m.id);
       b.disabled = !connected || jobBusy || (!!run.running && run.running !== m.id);
       b.addEventListener("click", () => {
@@ -94,6 +95,13 @@ export function initMacros(store, log) {
       $("#macro-edit-status").textContent = e.message;
     }
   });
+
+  for (let i = 0; i < 9; i++) {
+    registerAction(`macro${i + 1}`, () => {
+      const b = box.children[i];
+      if (b && !b.disabled) b.click();
+    });
+  }
 
   store.subscribe((kind) => {
     if (["snapshot", "macros", "macro", "connection", "job"].includes(kind)) render();

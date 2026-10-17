@@ -16,7 +16,13 @@ import { initSim } from "./ui/sim.js";
 import { initBottomTabs, initJob } from "./ui/job.js";
 import { initMacros } from "./ui/macros.js";
 import { initNotify } from "./ui/notify.js";
+import { initDisplayEditor } from "./display.js";
+import { initLayout } from "./ui/layout.js";
+import { initProfiles } from "./ui/profiles.js";
+import { initHelp } from "./ui/help.js";
 
+initDisplayEditor(); // first: theme, touch size and layout lock
+initLayout();
 const store = createStore();
 const log = initConsole(store);
 initConnection(store, log);
@@ -36,6 +42,8 @@ initBottomTabs();
 initJob(store, log, view);
 initMacros(store, log);
 initNotify(store);
+initProfiles(store);
+initHelp();
 
 const stream = new EventStream({
   onEvent: (type, data) => store.apply(type, data),

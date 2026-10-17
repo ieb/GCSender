@@ -6,25 +6,32 @@ import { $, $$, fmt } from "../ui/dom.js";
 import { OrbitCamera } from "./camera.js";
 import { LineBatch, Renderer } from "./gl.js";
 import { parseProgram } from "./gcode.js";
-
-const TRAIL_MAX = 5000;
-const DARK = window.matchMedia("(prefers-color-scheme: dark)");
+import { display, isDark, onDisplayChange, rgba } from "../display.js";
+import { registerAction } from "../keymap.js";
 
 function palette() {
-  return DARK.matches
-    ? { grid: [1, 1, 1, 0.07], grid10: [1, 1, 1, 0.16], bounds: [0.6, 0.7, 0.8, 0.5], tool: [1, 0.6, 0.15, 1], trail: [0.45, 0.65, 1, 0.9] }
-    : { grid: [0, 0, 0, 0.07], grid10: [0, 0, 0, 0.18], bounds: [0.3, 0.35, 0.45, 0.55], tool: [0.95, 0.5, 0.05, 1], trail: [0.2, 0.35, 0.85, 0.9] };
+  const d = display();
+  const base = isDark()
+    ? { grid: [1, 1, 1, 0.07], grid10: [1, 1, 1, 0.16], bounds: [0.6, 0.7, 0.8, 0.5] }
+    : { grid: [0, 0, 0, 0.07], grid10: [0, 0, 0, 0.18], bounds: [0.3, 0.35, 0.45, 0.55] };
+  return { ...base, tool: rgba(d.colTool), trail: rgba(d.colTrail, 0.9) };
 }
 const NOOP_VIEW = { setHeightmap() {}, setPreview() {}, setProgram() {}, setProgress() {}, setSelected() {} };
 // Toolpath colours (Candle-like): feed, rapid, plunge; progress tints done / in GRBL's buffer.
-const PATH = {
-  feed: [0.1, 0.45, 0.85, 0.95],
-  rapid: [0.55, 0.55, 0.55, 0.45],
-  plunge: [0.85, 0.2, 0.2, 0.95],
-  done: [0.6, 0.6, 0.6, 0.55],
-  buffer: [0.6, 0.25, 0.85, 1],
-  selected: [1, 0.75, 0, 1],
-};
+// Hidden rapids keep their vertices (alpha 0) so line -> vertex ranges stay valid.
+function pathColors() {
+  const d = display();
+  return {
+    feed: rgba(d.colFeed, 0.95),
+    rapid: rgba(d.colRapid, d.showRapids ? 0.45 : 0),
+    plunge: rgba(d.colPlunge, 0.95),
+    done: rgba(d.colDone, 0.55),
+    buffer: rgba(d.colBuffer),
+    selected: rgba(d.colSelected),
+  };
+}
+let PATH = pathColors();
+const makeTool = () => toolBatch(palette().tool, display().toolDiameter, display().toolAngle);
 
 // Blue (low) -> green -> red (high).
 function heat(t, alpha = 1) {
@@ -62,7 +69,7 @@ export function initVisualizer(store) {
   const statusEl = $("#vis-status");
   let renderer;
   try {
-    renderer = new Renderer(canvas);
+    renderer = new Renderer(canvas, { antialias: !!display().antialias });
   } catch {
     $("#vis-fallback").hidden = false;
     return NOOP_VIEW;
@@ -113,7 +120,7 @@ export function initVisualizer(store) {
     const { min, max } = extent();
     const g0 = [Math.floor(Math.min(min[0], 0) / 10) * 10 - 10, Math.floor(Math.min(min[1], 0) / 10) * 10 - 10];
     const g1 = [Math.ceil(Math.max(max[0], 0) / 10) * 10 + 10, Math.ceil(Math.max(max[1], 0) / 10) * 10 + 10];
-    const key = [g0, g1, limitsWork(), DARK.matches].join("|");
+    const key = [g0, g1, limitsWork(), isDark()].join("|");
     if (key === staticKey) return;
     staticKey = key;
     const grid = new LineBatch();
@@ -144,6 +151,7 @@ export function initVisualizer(store) {
     const pts = trail.map((m) => [m[0] - wco[0], m[1] - wco[1], m[2] - wco[2]]);
     b.polyline(pts, palette().trail);
     renderer.upload("trail", b);
+    renderer.setVisible("trail", !!display().showTrail);
   }
 
   function fit() {
@@ -171,7 +179,7 @@ export function initVisualizer(store) {
     hmBox = [[p.x, p.y, Math.min(0, m.min ?? 0)], [p.x + p.w, p.y + p.h, Math.max(0, m.max ?? 0)]];
     const lo = m.min ?? 0;
     const span = Math.max(1e-6, (m.max ?? 0) - lo);
-    const border = DARK.matches ? [1, 1, 1, 0.45] : [0, 0, 0, 0.45];
+    const border = isDark() ? [1, 1, 1, 0.45] : [0, 0, 0, 0.45];
     pts.polyline([[p.x, p.y, 0], [p.x + p.w, p.y, 0], [p.x + p.w, p.y + p.h, 0], [p.x, p.y + p.h, 0], [p.x, p.y, 0]], border);
     const s = Math.max(0.4, Math.min(p.w, p.h) / 60);
     for (let i = 0; i < p.ny; i++) {
@@ -220,7 +228,7 @@ export function initVisualizer(store) {
     if (text) {
       const parsed = parseProgram(text);
       previewBox = parsed.bounds;
-      const rc = DARK.matches ? [0.7, 0.7, 0.7, 0.35] : [0.4, 0.4, 0.4, 0.35];
+      const rc = isDark() ? [0.7, 0.7, 0.7, 0.35] : [0.4, 0.4, 0.4, 0.35];
       for (const sg of parsed.segments) b.line(sg.a, sg.b, sg.kind === "rapid" ? rc : [0.1, 0.55, 0.3, 0.95]);
     }
     renderer.upload("preview", b);
@@ -230,9 +238,10 @@ export function initVisualizer(store) {
     request();
   }
 
-  renderer.upload("tool", toolBatch(palette().tool));
+  renderer.upload("tool", makeTool());
   renderer.setVisible("tool", false);
   rebuildStatic();
+  renderer.setVisible("grid", !!display().showGrid);
 
   // -- live data ---------------------------------------------------------------
 
@@ -255,7 +264,8 @@ export function initVisualizer(store) {
     const last = trail[trail.length - 1];
     if (!last || Math.hypot(last[0] - s.mpos[0], last[1] - s.mpos[1], last[2] - s.mpos[2]) > 0.005) {
       trail.push([...s.mpos]);
-      if (trail.length > TRAIL_MAX) trail.splice(0, trail.length - TRAIL_MAX);
+      const max = display().trailLength;
+      if (trail.length > max) trail.splice(0, trail.length - max);
       trailDirty = true;
     }
     if (trailDirty || wcoChanged) {
@@ -316,6 +326,9 @@ export function initVisualizer(store) {
     });
   }
   $("#view-fit").addEventListener("click", fit);
+  registerAction("viewFit", fit);
+  registerAction("viewTop", () => { cam.setView("top"); fit(); });
+  registerAction("viewIso", () => { cam.setView("iso"); fit(); });
   const persp = $("#view-persp");
   persp.classList.add("active");
   persp.addEventListener("click", () => {
@@ -330,17 +343,29 @@ export function initVisualizer(store) {
   });
 
   new ResizeObserver(request).observe(canvas);
-  DARK.addEventListener("change", () => {
+  onDisplayChange(() => {
+    PATH = pathColors();
     staticKey = "";
-    renderer.upload("tool", toolBatch(palette().tool));
+    renderer.upload("tool", makeTool());
     rebuildStatic();
+    renderer.setVisible("grid", !!display().showGrid);
+    renderer.setVisible("trail", !!display().showTrail);
     rebuildTrail();
+    if (programText) {
+      const keepSel = selectedLine;
+      setProgram(programText, { keepView: true });
+      setSelected(keepSel);
+    }
     request();
   });
   request();
   // -- the loaded program, its progress and the selected line ------------------
 
-  function setProgram(text) {
+  let programText = null;
+  let selectedLine = null;
+
+  function setProgram(text, { keepView = false } = {}) {
+    programText = text || null;
     const b = new LineBatch();
     const m = new LineBatch();
     program = null;
@@ -367,7 +392,7 @@ export function initVisualizer(store) {
     applyProgress();
     staticKey = "";
     rebuildStatic();
-    if (text) fit();
+    if (text && !keepView) fit();
     request();
   }
 
@@ -394,6 +419,7 @@ export function initVisualizer(store) {
   }
 
   function setSelected(line) {
+    selectedLine = line;
     const b = new LineBatch();
     if (program && line !== null && line >= 0) {
       for (let k = program.lineStart[line]; k < program.lineStart[line + 1]; k++) {

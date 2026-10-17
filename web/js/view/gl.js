@@ -45,8 +45,8 @@ export class LineBatch {
 }
 
 export class Renderer {
-  constructor(canvas) {
-    const gl = canvas.getContext("webgl", { antialias: true, alpha: true, premultipliedAlpha: false });
+  constructor(canvas, { antialias = true } = {}) {
+    const gl = canvas.getContext("webgl", { antialias, alpha: true, premultipliedAlpha: false });
     if (!gl) throw new Error("WebGL unavailable");
     this.gl = gl;
     this.canvas = canvas;

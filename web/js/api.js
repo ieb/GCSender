@@ -106,6 +106,12 @@ export const api = {
   macros: () => request("GET", "/api/macros"),
   macrosSave: (macros) => request("PUT", "/api/macros", { macros }),
   macroRun: (id) => request("POST", `/api/macros/${encodeURIComponent(id)}/run`, {}),
+  settingsReset: () => request("POST", "/api/settings/reset", {}),
+  settingsImport: (doc, macros = true) => request("POST", "/api/settings/import", { doc, macros }),
+  profiles: () => request("GET", "/api/settings/profiles"),
+  profileSave: (name) => request("POST", "/api/settings/profiles", { name }),
+  profileLoad: (name, macros = true) => request("POST", "/api/settings/profiles/load", { name, macros }),
+  profileDelete: (name) => request("DELETE", `/api/settings/profiles/${encodeURIComponent(name)}`),
   simRestart: () => request("POST", "/api/sim/restart-server", {}),
   jobOverride: (kind, value) => request("POST", "/api/job/override", { kind, value }),
   async jobText() {
@@ -116,6 +122,10 @@ export const api = {
   simProbe: (forced) => request("POST", "/api/sim/probe", { forced }),
   simSurface: (changes) => request("PUT", "/api/sim/surface", changes),
 };
+
+export function downloadUrl(path) {
+  return path + "?" + new URLSearchParams({ t: token || "" }).toString();
+}
 
 export function heightmapExportUrl() {
   return "/api/heightmap/export?" + new URLSearchParams({ t: token || "" }).toString();

@@ -5,6 +5,7 @@
 
 import { api } from "../api.js";
 import { $, $$ } from "./dom.js";
+import { registerAction } from "../keymap.js";
 
 const ROW_H = 20;
 const ACTIVE = new Set(["starting", "running", "paused", "error", "toolchange"]);
@@ -116,6 +117,7 @@ export function initJob(store, log, view) {
     run(held ? api.jobResume() : api.jobPause(), held ? "resume" : "pause");
   });
   $("#job-stop").addEventListener("click", () => run(api.jobStop(), "stop"));
+  registerAction("jobPause", () => { if (!$("#job-pause").disabled) $("#job-pause").click(); });
   $("#job-prompt-stop").addEventListener("click", () => run(api.jobStop(), "stop"));
   $("#job-continue").addEventListener("click", () => run(api.jobResume(), "continue"));
 
@@ -209,6 +211,7 @@ export function initJob(store, log, view) {
       const cls = rowClass(i, j, errs);
       r.className = `row ${cls}${i === selected ? " sel" : ""}${i === from && from > 0 ? " from" : ""}`;
       r.dataset.line = i;
+      r.title = "Click to select this line: it is highlighted in the 3D view and becomes the 'from line' for Start";
       const n = document.createElement("span");
       n.className = "n";
       n.textContent = i + 1;

@@ -129,7 +129,7 @@ Legend:
 | Soft reset, then restore offsets and modal state | ✅ | Server captures `$#`/`$G` beforehand and restores G92 and modal state | P1 |
 | Unlock `$X`, Check `$C` | ✅ | | P1 |
 | Sleep | ❌ | 1.1 only | P1 (1.1) |
-| Door | 🟡 | `@` / `0x84` | P6 |
+| Door | 🟡 | `@` / `0x84`: Control panel **Door** button (feed hold reported as Door; Resume continues) | P6 ✅ |
 | Flood/mist | 🟡 | `M8`/`M7`/`M9` in Idle; real-time toggles while running on 1.1 | P2 ✅ |
 
 ### 3.3 Spindle and overrides
@@ -200,17 +200,17 @@ Legend:
 | Orbit/pan/zoom, Top/Front/Left/Iso, Fit, perspective/ortho | ✅ | | P2 ✅ |
 | Bounds info, machine bounds box, arc segment settings | ✅ | Bounds shown in the program panel; the jog box is drawn (P2) | P4 ✅ |
 | Raster/grayscale (laser) mode | ✅ | | Later |
-| Visual settings (colours, line width, AA) | ✅ | | P6 |
+| Visual settings (colours, line width, AA) | ✅ | Settings → Display (per browser): toolpath, progress, selection, tool and trail colours; grid / rapids / trail visibility, trail length, tool model size, antialiasing. Line width is not offered: WebGL draws 1-px lines in most browsers | P6 ✅ |
 
 ### 3.10 Shell
 | Candle feature | 0.9 | Implementation | Phase |
 |---|---|---|---|
-| Collapsible/resizable panels; layout lock | ✅ | Drag-to-rearrange: Later | P6 |
-| Settings (groups, defaults, profiles, import/export); shortcuts editor | ✅ | Machine and sender settings on the server; UI preferences in `localStorage` | P6 |
+| Collapsible/resizable panels; layout lock | ✅ | Left-column panels collapse from their title; dividers between the columns and above the program/console drag (double-click resets); sizes are clamped to the window; all kept per browser. Drag-to-rearrange: Later | P6 ✅ |
+| Settings (groups, defaults, profiles, import/export); shortcuts editor | ✅ | Machine and sender settings on the server; UI preferences in `localStorage`. **Defaults** (session keys kept), named **profiles** (settings + user commands, `<state>/profiles`), **export/import** JSON (all-or-nothing, unknown keys reported), **Back up $$** as a text file. Shortcuts: jog, step, feed, stop plus hold, resume, job pause, views, console and user commands 1–9 (unbound by default) | P6 ✅ |
 | User commands panel | ✅ | Buttons → G-code plus a small macro language (`{wx}`, `{prbz}`, `{max(safez, wz + 2)}`, `wait idle`), run by the server. Expressions are parsed with a whitelist (numbers, `+ - * /`, `min max abs`, named variables), never `eval`. A line using a position waits for Idle first; an error or Stop ends the macro. Stored in `<state>/macros.json` | P5 ✅ |
 | Script window (arbitrary JS) / plugins | ❌ | Covered by macros | ✗ |
 | Camera with reticle | ✅ | `getUserMedia` in the SPA | Later |
-| Theme (light/dark), help page | ✅ | | P6 |
+| Theme (light/dark), help page | ✅ | Theme: follow the system, light or dark, applied before first paint. Help dialog with workflow, recovery, safety, troubleshooting and the live key bindings | P6 ✅ |
 
 ### 3.11 bCNC features considered
 | Feature | Phase |
@@ -384,6 +384,9 @@ GET/PUT /api/macros            {macros: [{id, name, text}]}       POST /api/macr
 POST /api/sim/restart-server   (--simulate only) emulate a server crash + restart; the simulator keeps running
 GET/PUT /api/grbl/settings     $$ parsed / {id: value}
 GET/PUT /api/settings          app (server-side) settings
+POST /api/settings/reset       GET /api/settings/export (file)   POST /api/settings/import {doc, macros}
+GET/POST /api/settings/profiles {name}   POST /api/settings/profiles/load {name, macros}   DELETE /api/settings/profiles/{name}
+GET  /api/grbl/settings/export $$ backup (text)
 GET  /api/logs/serial          transcript download
 ```
 
@@ -437,7 +440,7 @@ GET  /api/logs/serial          transcript download
 | **P3 Probe & heightmap** ✅ (simulator) | Z probe (single/two-stage), probe test, heightmap create/auto/probe/edit/library, `.map` v3 I/O, bicubic, server transform + cache, SPA surface render, transformed-program fetch | A 5×4 map on the machine; `.map` interop with Candle; a reload mid-probe continues; the transformed job's Z verified on a test PCB. Simulator: a 5×4 map matches the simulated warped surface within 2 µm; a reload mid-run continues (browser-verified); `.map` files in Candle's layout read and write; transform verified by an independent interpreter (lines, arcs, G91, G20, G92). **Hardware check deferred**, and `.map` interop to be confirmed with a file saved by Candle itself |
 | **P4 Jobs & streaming** ✅ (simulator) | Upload/library, server parser + estimator, streamer job runner, pause/stop/from-line with restore, start/end commands, M6 flow, overrides, SPA program table + progress colouring + markers + bounds + ETA | A 50k-line job streams without stalls; a reload mid-job shows correct progress; ETA within ±15 %. Simulator: 50,004 lines streamed at ~670 lines/s with the planner full at real-time speed; a reload mid-job shows the same line, colours and ETA (browser-verified); ETA within ±15 % of the simulated run with the estimator given the simulator's constant-speed model (tests in `test_phase4.py`). **Hardware check deferred**: the ±15 % ETA on the real machine (acceleration, junctions) |
 | **P5 Recovery & user commands** ✅ (simulator) | Journal, start-up recovery (re-attach and post-reset paths), macros panel and engine, notifications | Killing and restarting the server mid-job on the simulator (reset and no-reset modes) recovers as specified. Simulator: no-reset restart matched the stop position to the exact line end and resumed seamlessly with every line sent (browser-verified, transcript checked); reset restart required the re-zero confirmation and resumed with a safe entry; lost link inside the server; missing job file; discard (tests in `test_phase5.py`). Notifications: desktop notification + tab title while the tab is hidden. **Hardware check deferred** |
-| **P6 Polish** | Settings UI and profiles, shortcuts editor, layout (collapse/resize), visual settings, theme, help, door command | Usable on desktop and tablet widths |
+| **P6 Polish** ✅ | Settings UI and profiles, shortcuts editor, layout (collapse/resize), visual settings, theme, help, door command | Usable on desktop and tablet widths. Checked in the browser at 1440×900, 1024×768 and 768×1024 (touch emulation: larger targets; one scrolling column under 900 px) and 390 px (no horizontal scrolling); tests in `test_phase6.py`. Every button explains itself in a tooltip (what it sends or does, e.g. G54–G59 with their stored zeros, `$G`/`$#`/`$$`/`$I`, the State-panel mode chips); `test_ui_tooltips.py` fails if a button without one is added |
 | **Later** | Line editing/undo, camera, orient/align, transform G-code, canned cycles, centre finder, TLO re-probe on M6, laser view, S-rewrite override on 0.9, re-probe selected points | — |
 
 ---

@@ -8,6 +8,9 @@ export const ACTIONS = [
   ["x+", "Jog X+"], ["x-", "Jog X−"], ["y+", "Jog Y+"], ["y-", "Jog Y−"], ["z+", "Jog Z+"], ["z-", "Jog Z−"],
   ["step+", "Larger step"], ["step-", "Smaller step"], ["feed+", "Faster jog feed"], ["feed-", "Slower jog feed"],
   ["stop", "Stop all motion"],
+  ["hold", "Feed hold"], ["resume", "Resume (cycle start)"], ["jobPause", "Job: pause / resume"],
+  ["viewFit", "View: fit"], ["viewTop", "View: top"], ["viewIso", "View: iso"], ["console", "Go to the console"],
+  ...Array.from({ length: 9 }, (_, i) => [`macro${i + 1}`, `User command ${i + 1}`]),
 ];
 
 export const DEFAULTS = {
@@ -22,7 +25,24 @@ export const DEFAULTS = {
   "feed+": ["NumpadMultiply", "BracketRight"],
   "feed-": ["NumpadDivide", "BracketLeft"],
   stop: ["Escape"],
+  // Unbound by default: assign in Settings → Keyboard.
+  hold: [], resume: [], jobPause: [], viewFit: [], viewTop: [], viewIso: [], console: [],
+  ...Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`macro${i + 1}`, []])),
 };
+
+// Modules register what an action does; jog.js dispatches key presses.
+const handlers = new Map();
+export function registerAction(action, fn) {
+  handlers.set(action, fn);
+}
+export function runAction(action) {
+  const fn = handlers.get(action);
+  if (fn) fn();
+  return !!fn;
+}
+export function bindings() {
+  return ACTIONS.map(([action, label]) => [label, (map[action] || []).map(keyLabel)]);
+}
 
 export const AXIS_ACTIONS = {
   "x+": [1, 0, 0], "x-": [-1, 0, 0], "y+": [0, 1, 0], "y-": [0, -1, 0], "z+": [0, 0, 1], "z-": [0, 0, -1],
@@ -68,7 +88,7 @@ export function initKeymapEditor() {
         for (const code of map[action] || []) {
           const k = document.createElement("kbd");
           k.textContent = keyLabel(code);
-          k.title = "Click to remove";
+          k.title = `Click to remove ${keyLabel(code)} from “${label}”`;
           k.addEventListener("click", () => {
             if (action === "stop" && map.stop.length === 1) {
               status.textContent = "Stop needs at least one key.";
@@ -84,6 +104,7 @@ export function initKeymapEditor() {
         const add = document.createElement("button");
         add.type = "button";
         add.textContent = capturing === action ? "Press a key…" : "Add key";
+        add.title = `Assign another key to “${label}”: click, then press the key (Backspace cancels)`;
         add.addEventListener("click", () => {
           capturing = action;
           status.textContent = `Press the key for “${label}” (Backspace cancels).`;

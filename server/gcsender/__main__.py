@@ -21,6 +21,7 @@ from .jobs.library import JobLibrary
 from .macros import MacroRunner, MacroStore
 from .jobs.runner import JobRunner
 from .probe import Prober
+from .profiles import ProfileStore
 from .simulator import GrblSimulator, parse_surface_spec
 from .store import SettingsStore
 from .transport import SerialTransport, SimTransport, Transport
@@ -111,6 +112,7 @@ def main(argv: list[str] | None = None) -> int:
             bus, controller, simulator=args.simulate, transcript=transcript, log_ring=log_ring,
             maps=maps, prober=prober, sim=sim, jobs=jobs, macros=macros,
             sim_restart=simulated_restart if sim else None,
+            profiles=ProfileStore(state_dir),
         )
 
     def simulated_restart() -> None:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import threading
 from typing import Any, Callable
 
@@ -15,7 +16,10 @@ from .heightmap.service import HeightmapService
 from .jobs.library import MAX_JOB_BYTES, JobError
 from .jobs.runner import JobRunner
 from .macros import MacroError, MacroRunner
+from .macros import validate as validate_macros
 from .probe import Prober
+from .profiles import ProfileError, ProfileStore
+from . import profiles as prof
 from .simulator import SURFACE_PRESETS, SurfaceParams
 from .logs import LogRing, Transcript
 from .store import SettingsError
@@ -40,6 +44,8 @@ def _wrap(fn: Callable[[Request], Any]) -> Callable[[Request], Any]:
             raise ApiError(400, str(e)) from None
         except MacroError as e:
             raise ApiError(404 if "no such" in str(e) else 400, str(e)) from None
+        except ProfileError as e:
+            raise ApiError(404 if "no such" in str(e) else 400, str(e)) from None
 
     return inner
 
@@ -57,6 +63,7 @@ def build_router(
     macros: MacroRunner | None = None,
     sim: Any = None,
     sim_restart: Callable[[], None] | None = None,
+    profiles: ProfileStore | None = None,
 ) -> Router:
     r = Router()
 
@@ -504,6 +511,71 @@ def build_router(
             raise ApiError(400, "expected an object")
         return ctl().update_settings(body)
 
+    # -- defaults, profiles, import/export (P6) -----------------------------------
+
+    def _profiles() -> ProfileStore:
+        if profiles is None:
+            raise ApiError(503, "profiles unavailable")
+        return profiles
+
+    def _macro_list() -> list[dict[str, Any]] | None:
+        return macros.store.list() if macros is not None else None
+
+    def _grbl_values() -> dict[str, Any]:
+        return {str(s["id"]): s.get("raw", s["value"]) for s in ctl().model.settings_list()}
+
+    def _apply(doc: Any, with_macros: bool) -> dict[str, Any]:
+        settings, macro_list, ignored = prof.parse(doc)
+        clean_macros = None
+        if with_macros and macro_list is not None and macros is not None:
+            clean_macros = validate_macros(macro_list)  # validate everything before changing anything
+        values = ctl().update_settings(settings)
+        if clean_macros is not None:
+            assert macros is not None
+            macros.save(clean_macros)
+        return {"settings": values, "macros": clean_macros is not None, "ignored": ignored}
+
+    def settings_reset(_req: Request) -> Any:
+        return ctl().update_settings(prof.defaults())
+
+    def settings_export(_req: Request) -> Any:
+        doc = prof.document(ctl().settings.all(), _macro_list(), _grbl_values() or None)
+        return RawResponse(json.dumps(doc, indent=1).encode(), "application/json", "gcsender-settings.json")
+
+    def settings_import(req: Request) -> Any:
+        body = req.json()
+        return _apply(body.get("doc"), _flag(body, "macros", True))
+
+    def profiles_list(_req: Request) -> Any:
+        return {"profiles": _profiles().list()}
+
+    def profiles_save(req: Request) -> Any:
+        name = req.json().get("name")
+        if not isinstance(name, str):
+            raise ApiError(400, "name is required")
+        _profiles().save(name, prof.document(ctl().settings.all(), _macro_list()))
+        return {"profiles": _profiles().list()}
+
+    def profiles_load(req: Request) -> Any:
+        body = req.json()
+        name = body.get("name")
+        if not isinstance(name, str):
+            raise ApiError(400, "name is required")
+        return _apply(_profiles().load(name), _flag(body, "macros", True))
+
+    def profiles_delete(req: Request) -> Any:
+        _profiles().delete(req.params["name"])
+        return {"profiles": _profiles().list()}
+
+    def grbl_settings_export(_req: Request) -> Any:
+        values = _grbl_values()
+        if not values:
+            raise ApiError(409, "no GRBL settings read yet")
+        fw = ctl().connection.get("firmware") or "?"
+        lines = [f"; GRBL {fw} settings saved by GCSender {__version__}"]
+        lines += [f"${k}={v}" for k, v in sorted(values.items(), key=lambda kv: int(kv[0]))]
+        return RawResponse(("\n".join(lines) + "\n").encode(), "text/plain; charset=utf-8", "grbl-settings.txt")
+
     # -- logs -----------------------------------------------------------------
 
     def logs_app(_req: Request) -> Any:
@@ -577,6 +649,14 @@ def build_router(
     add("GET", "/api/grbl/settings", grbl_settings)
     add("PUT", "/api/grbl/settings", grbl_settings_put)
     add("POST", "/api/grbl/settings/refresh", grbl_settings_refresh)
+    add("POST", "/api/settings/reset", settings_reset)
+    add("GET", "/api/settings/export", settings_export)
+    add("POST", "/api/settings/import", settings_import)
+    add("GET", "/api/settings/profiles", profiles_list)
+    add("POST", "/api/settings/profiles", profiles_save)
+    add("POST", "/api/settings/profiles/load", profiles_load)
+    add("DELETE", "/api/settings/profiles/{name}", profiles_delete)
+    add("GET", "/api/grbl/settings/export", grbl_settings_export)
     add("GET", "/api/settings", app_settings)
     add("PUT", "/api/settings", app_settings_put)
     add("GET", "/api/logs/app", logs_app)

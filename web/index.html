@@ -6,6 +6,7 @@
   <meta name="gcs-token" content="">
   <title>GCSender</title>
   <link rel="stylesheet" href="css/app.css">
+  <script src="js/theme.js"></script>
   <script type="module" src="js/app.js"></script>
 </head>
 <body>
@@ -13,18 +14,19 @@
     <div class="brand">GCSender</div>
     <div class="conn" id="conn">
       <select id="conn-port" title="Serial port"></select>
-      <button id="conn-refresh" type="button" title="Refresh ports">⟳</button>
+      <button id="conn-refresh" type="button" title="Refresh the list of serial ports on the server">⟳</button>
       <select id="conn-baud" title="Baud rate">
         <option>9600</option><option>19200</option><option>38400</option><option>57600</option>
         <option selected>115200</option><option>230400</option>
       </select>
-      <button id="conn-toggle" type="button" class="primary">Connect</button>
+      <button title="Open (or close) the selected serial port on the server. Disconnecting never stops a running job's buffered moves; the job shows as interrupted and can be resumed." id="conn-toggle" type="button" class="primary">Connect</button>
       <span id="conn-info" class="muted"></span>
     </div>
     <div class="top-actions">
       <button id="notify-toggle" type="button" title="Desktop notifications when a job finishes or needs you (tool change, error, interruption) while this tab is in the background">🔕</button>
-      <button id="open-settings" type="button" title="GRBL and application settings">Settings</button>
-      <button id="open-logs" type="button" title="Application log and serial transcripts">Logs</button>
+      <button id="open-settings" type="button" title="Settings: GRBL $$ values, application settings and profiles, keyboard shortcuts, display">Settings</button>
+      <button id="open-logs" type="button" title="Logs: the server's application log and the daily serial transcripts">Logs</button>
+      <button id="open-help" type="button" title="Help: how to use GCSender, safety notes and troubleshooting">Help</button>
     </div>
     <div class="link" id="link" title="Server link"><span class="dot"></span><span id="link-text">offline</span></div>
   </header>
@@ -57,8 +59,8 @@
       </section>
 
       <nav class="left-tabs" role="tablist">
-        <button type="button" class="tab" data-left-tab="machine" role="tab">Machine</button>
-        <button type="button" class="tab" data-left-tab="probe" role="tab">Probe &amp; heightmap</button>
+        <button title="Jogging, coordinates, spindle, user commands and machine control" type="button" class="tab" data-left-tab="machine" role="tab">Machine</button>
+        <button title="Z probing, the heightmap (surface map for PCB work) and, in simulate mode, the virtual surface" type="button" class="tab" data-left-tab="probe" role="tab">Probe &amp; heightmap</button>
       </nav>
 
       <section class="panel sim-panel" id="panel-sim" data-group="probe" data-unavailable hidden>
@@ -66,7 +68,7 @@
         <p class="muted small">The simulated probe input closes when the tool tip reaches this surface (machine coordinates).</p>
         <div class="row">
           <select id="sim-preset" class="grow-input" title="Start from a preset"></select>
-          <button type="button" id="sim-preset-apply">Use preset</button>
+          <button title="Replace the surface settings below with the selected preset (simulator only)" type="button" id="sim-preset-apply">Use preset</button>
         </div>
         <form id="sim-form" class="hm-form" autocomplete="off">
           <span class="lbl">Height (machine Z)</span><input name="base" type="number" step="0.5"><span></span>
@@ -77,7 +79,7 @@
           <span class="lbl">Bump centre X / Y</span><input name="bumpX" type="number" step="1"><input name="bumpY" type="number" step="1">
         </form>
         <div class="row">
-          <button type="button" id="sim-apply">Apply surface</button>
+          <button title="Apply the surface settings above to the simulated workpiece" type="button" id="sim-apply">Apply surface</button>
           <span class="muted small">Probe input</span>
           <div class="seg sim-pin" id="sim-pin" role="group" aria-label="Simulated probe input">
             <button type="button" data-pin="auto" title="Closed when the tool touches the virtual surface">auto</button>
@@ -91,7 +93,7 @@
         </div>
         <div class="row" id="sim-restart-row" hidden>
           <span class="muted small grow-input">Test recovery: drop the controller and job runner as if the server process died, then start again. The simulated machine keeps running its buffer; it resets on reconnect unless started with <code>--sim-no-reset</code>.</span>
-          <button type="button" id="sim-restart" class="danger">Simulate server restart</button>
+          <button title="Pretend the server process died and restarted (simulator only), to try job recovery" type="button" id="sim-restart" class="danger">Simulate server restart</button>
         </div>
       </section>
 
@@ -127,7 +129,7 @@
           <span class="lbl">Interp. points X / Y</span><input name="interpNx" type="number" step="1" min="2"><input name="interpNy" type="number" step="1" min="2">
         </form>
         <div class="row">
-          <button type="button" id="hm-apply">Apply</button>
+          <button title="Save the border, grid and probe settings above (clears probed values if the grid changes)" type="button" id="hm-apply">Apply</button>
           <label class="file-button" title="Set the border to the cutting area of a G-code file">Auto from file…<input type="file" id="hm-auto-file" accept=".nc,.gcode,.ngc,.tap,.txt,.cnc" hidden></label>
           <span class="muted small">margin</span><input id="hm-margin" type="number" step="0.5" min="0" value="1" class="narrow">
         </div>
@@ -135,28 +137,28 @@
           <button type="button" id="hm-probe" class="primary" title="Probe the grid (G38.2 at each point; the origin is probed first as the Z reference)">Probe map</button>
           <button type="button" id="hm-abort" class="danger" title="Stop probing (hold, then reset; offsets are restored)">Abort</button>
           <button type="button" id="hm-origin" title="Rapid to the map origin at safe Z">Go origin</button>
-          <button type="button" id="hm-clear" title="Clear all probed values">Clear</button>
+          <button type="button" id="hm-clear" title="Clear all probed values in the heightmap (the grid settings are kept)">Clear</button>
         </div>
         <div id="hm-progress" class="muted small"></div>
         <div class="hm-table-wrap"><table class="hm-table mono" id="hm-table"></table></div>
         <h3 class="sub">Library</h3>
         <div class="row">
           <select id="hm-lib" class="grow-input"></select>
-          <button type="button" id="hm-load">Load</button>
-          <button type="button" id="hm-delete" class="link-button">delete</button>
+          <button title="Load the selected map from the server's library into the current heightmap" type="button" id="hm-load">Load</button>
+          <button title="Delete the selected map from the library" type="button" id="hm-delete" class="link-button">delete</button>
         </div>
         <div class="row">
           <input id="hm-save-name" type="text" placeholder="name" class="grow-input">
-          <button type="button" id="hm-save">Save</button>
+          <button title="Save the current heightmap in the library under this name" type="button" id="hm-save">Save</button>
         </div>
         <div class="row">
           <label class="file-button">Import .map…<input type="file" id="hm-import" accept=".map,.txt" hidden></label>
-          <a id="hm-export" class="button-like" href="#" download>Export .map</a>
+          <a title="Download the current heightmap as a Candle-compatible .map file" id="hm-export" class="button-like" href="#" download>Export .map</a>
         </div>
         <h3 class="sub">Apply to a program</h3>
         <div class="row">
           <label class="file-button" title="Compensate a G-code file with this heightmap (done on the server)">Compensate file…<input type="file" id="hm-transform-file" accept=".nc,.gcode,.ngc,.tap,.txt,.cnc" hidden></label>
-          <a id="hm-transform-download" class="button-like" href="#" hidden>Download</a>
+          <a title="Download the heightmap-compensated G-code" id="hm-transform-download" class="button-like" href="#" hidden>Download</a>
           <label><input type="checkbox" id="hm-preview" checked> show in 3D</label>
         </div>
         <div id="hm-transform-info" class="muted small"></div>
@@ -169,19 +171,19 @@
         </h2>
         <div class="jog">
           <div class="jog-xy">
-            <button type="button" data-jog="-1,1,0" title="X− Y+">↖</button>
-            <button type="button" data-jog="0,1,0" title="Y+">Y+</button>
-            <button type="button" data-jog="1,1,0" title="X+ Y+">↗</button>
-            <button type="button" data-jog="-1,0,0" title="X−">X−</button>
-            <button type="button" id="jog-stop" class="danger" title="Stop all motion (Esc)">■</button>
-            <button type="button" data-jog="1,0,0" title="X+">X+</button>
-            <button type="button" data-jog="-1,-1,0" title="X− Y−">↙</button>
-            <button type="button" data-jog="0,-1,0" title="Y−">Y−</button>
-            <button type="button" data-jog="1,-1,0" title="X+ Y−">↘</button>
+            <button type="button" data-jog="-1,1,0" title="Jog diagonally left and back (X− and Y+): one step of the selected size at the jog feed (one click = one step; holding does not repeat)">↖</button>
+            <button type="button" data-jog="0,1,0" title="Jog Y+ (away from you on a C3018): one step of the selected size at the jog feed (one click = one step; holding does not repeat)">Y+</button>
+            <button type="button" data-jog="1,1,0" title="Jog diagonally right and back (X+ and Y+): one step of the selected size at the jog feed (one click = one step; holding does not repeat)">↗</button>
+            <button type="button" data-jog="-1,0,0" title="Jog X− (left): one step of the selected size at the jog feed (one click = one step; holding does not repeat)">X−</button>
+            <button type="button" id="jog-stop" class="danger" title="Stop all motion now (Esc): feed hold, then reset once stopped. No alarm; offsets are kept">■</button>
+            <button type="button" data-jog="1,0,0" title="Jog X+ (right): one step of the selected size at the jog feed (one click = one step; holding does not repeat)">X+</button>
+            <button type="button" data-jog="-1,-1,0" title="Jog diagonally left and forward (X− and Y−): one step of the selected size at the jog feed (one click = one step; holding does not repeat)">↙</button>
+            <button type="button" data-jog="0,-1,0" title="Jog Y− (towards you): one step of the selected size at the jog feed (one click = one step; holding does not repeat)">Y−</button>
+            <button type="button" data-jog="1,-1,0" title="Jog diagonally right and forward (X+ and Y−): one step of the selected size at the jog feed (one click = one step; holding does not repeat)">↘</button>
           </div>
           <div class="jog-z">
-            <button type="button" data-jog="0,0,1" title="Z+">Z+</button>
-            <button type="button" data-jog="0,0,-1" title="Z−">Z−</button>
+            <button type="button" data-jog="0,0,1" title="Jog Z+ (raise the tool): one step of the selected size at the jog feed (one click = one step; holding does not repeat)">Z+</button>
+            <button type="button" data-jog="0,0,-1" title="Jog Z− (lower the tool, towards the work): one step of the selected size at the jog feed (one click = one step; holding does not repeat)">Z−</button>
           </div>
         </div>
         <div class="jog-step-row">
@@ -197,25 +199,25 @@
       <section class="panel" id="panel-wcs" data-group="machine">
         <h2>Coordinates</h2>
         <div class="seg" id="wcs-select">
-          <button type="button" data-wcs="G54">G54</button><button type="button" data-wcs="G55">G55</button>
-          <button type="button" data-wcs="G56">G56</button><button type="button" data-wcs="G57">G57</button>
-          <button type="button" data-wcs="G58">G58</button><button type="button" data-wcs="G59">G59</button>
+          <button title="Work coordinate system 1 (G54): the default. Each of G54–G59 stores its own work zero (an offset from machine zero) in GRBL's EEPROM, so it survives power cycles. Click to make G54 active; positions and zeroing then refer to it." type="button" data-wcs="G54">G54</button><button title="Work coordinate system 2 (G55): a second stored work zero, e.g. for a second part or fixture. Click to make it active." type="button" data-wcs="G55">G55</button>
+          <button title="Work coordinate system 3 (G56): a third stored work zero. Click to make it active." type="button" data-wcs="G56">G56</button><button title="Work coordinate system 4 (G57): a fourth stored work zero. Click to make it active." type="button" data-wcs="G57">G57</button>
+          <button title="Work coordinate system 5 (G58): a fifth stored work zero. Click to make it active." type="button" data-wcs="G58">G58</button><button title="Work coordinate system 6 (G59): a sixth stored work zero. Click to make it active." type="button" data-wcs="G59">G59</button>
         </div>
         <div class="buttons five">
-          <button type="button" data-zero="x" title="Set work X = 0 here">X0</button>
-          <button type="button" data-zero="y" title="Set work Y = 0 here">Y0</button>
-          <button type="button" data-zero="z" title="Set work Z = 0 here">Z0</button>
-          <button type="button" data-zero="xy" title="Set work X and Y = 0 here">XY0</button>
-          <button type="button" data-zero="xyz" title="Set work X, Y and Z = 0 here">All 0</button>
+          <button type="button" data-zero="x" title="Set work X = 0 at the current position (G10 L20 in the active coordinate system, stored in EEPROM; with 'temporary' ticked, G92 instead)">X0</button>
+          <button type="button" data-zero="y" title="Set work Y = 0 at the current position (G10 L20, or G92 when 'temporary' is ticked)">Y0</button>
+          <button type="button" data-zero="z" title="Set work Z = 0 at the current position (G10 L20, or G92 when 'temporary' is ticked). Usually done with the tool touching the top of the work">Z0</button>
+          <button type="button" data-zero="xy" title="Set work X and Y = 0 at the current position: the job's origin (G10 L20, or G92 when 'temporary' is ticked)">XY0</button>
+          <button type="button" data-zero="xyz" title="Set work X, Y and Z = 0 at the current position (G10 L20, or G92 when 'temporary' is ticked)">All 0</button>
         </div>
         <div class="row">
           <label title="Use G92 (temporary, cleared by reset/power cycle) instead of storing in the active G54-G59 (EEPROM)"><input type="checkbox" id="wcs-temp"> temporary (G92)</label>
-          <button type="button" id="g92-clear" class="link-button" title="G92.1">clear G92</button>
+          <button type="button" id="g92-clear" class="link-button" title="Clear the temporary G92 offset (G92.1); the stored G54–G59 work zero applies again">clear G92</button>
         </div>
         <div class="buttons three">
           <button type="button" id="goto-xy0" title="Raise to safe Z if below it, then rapid to work X0 Y0">Go XY0</button>
-          <button type="button" id="goto-z0" title="Rapid to work Z0">Go Z0</button>
-          <button type="button" id="goto-safe" title="Rapid to the safe Z height">Safe Z</button>
+          <button type="button" id="goto-z0" title="Rapid (G0) down to work Z0 at the current XY. Careful: Z0 is usually the top of the work">Go Z0</button>
+          <button type="button" id="goto-safe" title="Rapid (G0) to the safe Z height (Settings → Application → Safe Z), clear of clamps and the work">Safe Z</button>
         </div>
         <div id="wcs-offsets" class="muted small mono"></div>
       </section>
@@ -225,7 +227,7 @@
         <div class="row">
           <input type="number" id="spindle-rpm" class="mono" min="0" step="1" title="Spindle speed (S)">
           <input type="range" id="spindle-slider" min="0" max="1000" step="10" title="Spindle speed">
-          <button type="button" id="spindle-toggle" title="M3 / M5">On</button>
+          <button type="button" id="spindle-toggle" title="Start the spindle clockwise at the speed on the left (M3 S…), or stop it (M5)">On</button>
         </div>
         <div class="row">
           <label><input type="checkbox" id="coolant-flood"> flood (M8)</label>
@@ -242,35 +244,37 @@
       <section class="panel" id="panel-control" data-group="machine">
         <h2>Control</h2>
         <div class="buttons">
-          <button type="button" data-rt="hold" title="Feed hold (!) — decelerates to a stop">Hold</button>
-          <button type="button" data-rt="resume" title="Cycle start / resume (~)">Resume</button>
+          <button type="button" data-rt="hold" title="Hold (!): feed hold. Decelerates to a stop without losing position; Resume continues">Hold</button>
+          <button type="button" data-rt="resume" title="Resume (~): cycle start. Continues after a Hold, Door or an M0 program pause">Resume</button>
+          <button type="button" data-rt="door" title="Safety door: feed hold and park as GRBL's door input would (GRBL 0.9: @, 1.1: 0x84). Resume continues.">Door</button>
           <button type="button" data-rt="reset" class="danger" title="Soft reset (Ctrl-X). Offsets and parser state are restored afterwards if enabled in Settings.">Reset</button>
-          <button type="button" data-ctl="unlock" id="btn-unlock" title="Kill alarm lock ($X)">Unlock</button>
-          <button type="button" data-ctl="home" id="btn-home" title="Homing cycle ($H)">Home</button>
-          <button type="button" data-ctl="check" id="btn-check" title="Toggle G-code check mode ($C)">Check</button>
-          <button type="button" data-ctl="sleep" id="btn-sleep" title="Sleep ($SLP, GRBL 1.1)" hidden>Sleep</button>
+          <button type="button" data-ctl="unlock" id="btn-unlock" title="Unlock ($X): clear an alarm so the machine accepts commands again. Positions may be wrong after an alarm: re-check work zero.">Unlock</button>
+          <button type="button" data-ctl="home" id="btn-home" title="Home ($H): run the homing cycle to the limit switches (needs homing enabled, $22=1, and switches fitted).">Home</button>
+          <button type="button" data-ctl="check" id="btn-check" title="Check ($C): toggle check mode. GRBL parses and checks G-code without moving, so a program can be dry-run for errors. Leaving check mode resets GRBL; GCSender restores the parser state.">Check</button>
+          <button type="button" data-ctl="sleep" id="btn-sleep" title="Sleep ($SLP, GRBL 1.1 only): disable the steppers and spindle until reset." hidden>Sleep</button>
         </div>
         <div class="buttons query-row">
-          <button type="button" data-cmd="$G" title="Parser state ($G)">$G</button>
-          <button type="button" data-cmd="$#" title="Coordinate offsets ($#)">$#</button>
-          <button type="button" data-cmd="$$" title="Settings ($$)">$$</button>
-          <button type="button" data-cmd="$I" title="Build info ($I)">$I</button>
+          <button type="button" data-cmd="$G" title="$G: show GRBL's parser state, the active modes such as G54 (coordinate system), G21 (mm), G90 (absolute), G17 (XY plane), M5 (spindle off), F (feed) and S (speed). The State panel chips show the same.">$G</button>
+          <button type="button" data-cmd="$#" title="$#: show the stored offsets: work zeros G54–G59, G28/G30 positions, the temporary G92 offset, the tool length offset (TLO) and the last probe contact (PRB).">$#</button>
+          <button type="button" data-cmd="$$" title="$$: list GRBL's settings ($0–$132: steps/mm, max rates, acceleration, travel, homing…). Edit them in Settings → Machine (GRBL).">$$</button>
+          <button type="button" data-cmd="$I" title="$I: show GRBL's version and build info (e.g. 0.9j.20180122).">$I</button>
         </div>
       </section>
     </section>
+    <div class="splitter v" id="split-left" role="separator" aria-orientation="vertical" title="Drag to resize · double-click to reset"></div>
 
     <section class="col-main">
       <section class="panel grow" id="panel-visualizer">
         <h2>
           <span>Visualizer</span>
           <span class="view-tools">
-            <button type="button" data-view="top" title="Top view">Top</button>
-            <button type="button" data-view="front" title="Front view">Front</button>
-            <button type="button" data-view="left" title="Left view">Left</button>
-            <button type="button" data-view="iso" title="Isometric view">Iso</button>
-            <button type="button" id="view-fit" title="Fit everything in view">Fit</button>
-            <button type="button" id="view-persp" title="Toggle perspective / orthographic">Persp</button>
-            <button type="button" id="view-trail-clear" title="Clear the tool trail">Clear trail</button>
+            <button type="button" data-view="top" title="View from above (XY plane)">Top</button>
+            <button type="button" data-view="front" title="View from the front (XZ plane)">Front</button>
+            <button type="button" data-view="left" title="View from the left (YZ plane)">Left</button>
+            <button type="button" data-view="iso" title="Isometric 3D view">Iso</button>
+            <button type="button" id="view-fit" title="Zoom to fit the program, map, jog box and tool">Fit</button>
+            <button type="button" id="view-persp" title="Switch between perspective and orthographic (true-scale) projection">Persp</button>
+            <button type="button" id="view-trail-clear" title="Clear the line showing where the tool has been">Clear trail</button>
           </span>
         </h2>
         <div class="viewport" id="viewport">
@@ -280,28 +284,29 @@
           <div class="overlay center muted" id="vis-fallback" hidden>WebGL is not available in this browser.</div>
         </div>
       </section>
+      <div class="splitter h" id="split-bottom" role="separator" aria-orientation="horizontal" title="Drag to resize · double-click to reset"></div>
       <div class="tabs bottom-tabs" role="tablist">
-        <button type="button" class="tab active" data-bottom="program" role="tab">Program <span id="job-tab-badge" class="small muted"></span></button>
-        <button type="button" class="tab" data-bottom="console" role="tab">Console</button>
+        <button title="The loaded program: open, start, pause, stop, progress and line table" type="button" class="tab active" data-bottom="program" role="tab">Program <span id="job-tab-badge" class="small muted"></span></button>
+        <button title="Everything sent to and received from GRBL; type commands here" type="button" class="tab" data-bottom="console" role="tab">Console</button>
       </div>
       <section class="panel bottom-panel" id="panel-program" data-bottom-body="program">
         <div class="job-bar">
           <label class="button-like" title="Upload a G-code file to the server (it is kept in the job library)">Open…<input type="file" id="job-file" accept=".nc,.gcode,.ngc,.tap,.cnc,.txt,.gc,.g" hidden></label>
           <select id="job-library" title="Job library on the server"><option value="">Library…</option></select>
-          <button type="button" id="job-unload" title="Unload the program">✕</button>
+          <button type="button" id="job-unload" title="Unload the program (it stays in the library)">✕</button>
           <span id="job-name" class="job-name mono"></span>
           <label title="Stream the heightmap-compensated program (computed on the server)"><input type="checkbox" id="job-heightmap"> heightmap</label>
         </div>
         <div class="job-bar">
-          <button type="button" id="job-start" class="primary" title="Start the job (from the line below)">▶ Start</button>
-          <button type="button" id="job-pause" title="Feed hold / resume">⏸ Pause</button>
+          <button type="button" id="job-start" class="primary" title="Start streaming the program from line 1, or from the 'from line' number with a safe entry">▶ Start</button>
+          <button type="button" id="job-pause" title="Pause the job with a feed hold (the machine decelerates and waits); press again to resume">⏸ Pause</button>
           <button type="button" id="job-stop" class="danger" title="Stop: feed hold, then reset; offsets are restored">■ Stop</button>
           <label title="Start from this line: the server restores the modal state and enters safely (safe Z, XY, spindle + dwell, plunge)">from line <input type="number" id="job-from" min="1" value="1" class="num"></label>
           <span class="spacer"></span>
-          <label id="job-ov-feed-wrap" title="Feed override">feed <input type="range" id="job-ov-feed" min="10" max="200" step="10" value="100"> <output id="job-ov-feed-val" class="mono">100%</output></label>
+          <label id="job-ov-feed-wrap" title="Feed override, 10–200 %. Double-click to reset to 100 %">feed <input type="range" id="job-ov-feed" min="10" max="200" step="10" value="100"> <output id="job-ov-feed-val" class="mono">100%</output></label>
           <span id="job-ov-rt" hidden>
-            <label title="Rapid override (GRBL 1.1)">rapid <select id="job-ov-rapid"><option>100</option><option>50</option><option>25</option></select></label>
-            <label title="Spindle override (GRBL 1.1)">spindle <input type="range" id="job-ov-spindle" min="10" max="200" step="10" value="100"> <output id="job-ov-spindle-val" class="mono">100%</output></label>
+            <label title="Rapid (G0) speed override, 25/50/100 % (GRBL 1.1 only)">rapid <select id="job-ov-rapid"><option>100</option><option>50</option><option>25</option></select></label>
+            <label title="Spindle speed override, 10–200 % (GRBL 1.1 only)">spindle <input type="range" id="job-ov-spindle" min="10" max="200" step="10" value="100"> <output id="job-ov-spindle-val" class="mono">100%</output></label>
           </span>
         </div>
         <div class="job-progress">
@@ -324,8 +329,8 @@
         </div>
         <div id="job-prompt" class="job-prompt" hidden>
           <span id="job-prompt-text"></span>
-          <button type="button" id="job-continue" class="primary">Continue</button>
-          <button type="button" id="job-prompt-stop" class="danger">Stop job</button>
+          <button title="Carry on with the job (after a tool change or an error)" type="button" id="job-continue" class="primary">Continue</button>
+          <button title="End the job here (feed hold, reset, offsets restored)" type="button" id="job-prompt-stop" class="danger">Stop job</button>
         </div>
         <div id="job-info" class="small muted"></div>
         <div id="job-table" class="job-table mono" tabindex="0" aria-label="Program lines">
@@ -339,15 +344,15 @@
           <span>Console</span>
           <span class="console-tools">
             <label title="Show commands sent automatically by GCSender ($G, $#, restore…)"><input type="checkbox" id="console-show-system"> system</label>
-            <label title="Show commands sent by panel buttons"><input type="checkbox" id="console-show-ui" checked> UI</label>
-            <button type="button" id="console-clear" class="link-button">clear</button>
+            <label title="Also show commands sent by GCSender's buttons (not just what you typed)"><input type="checkbox" id="console-show-ui" checked> UI</label>
+            <button title="Clear the console view (the serial transcript is kept)" type="button" id="console-clear" class="link-button">clear</button>
           </span>
         </h2>
         <div id="console-out" class="console-out mono" role="log" aria-live="polite"></div>
         <form id="console-form" class="console-form" autocomplete="off">
           <input id="console-input" class="mono" placeholder="Command, e.g. $$ or G0 X10" spellcheck="false" list="console-history">
           <datalist id="console-history"></datalist>
-          <button type="submit">Send</button>
+          <button title="Send the command to GRBL (Enter). Real-time commands such as ! ~ ? have their own buttons" type="submit">Send</button>
         </form>
       </section>
     </section>
@@ -356,9 +361,10 @@
   <dialog id="dlg-settings" class="dialog">
     <form method="dialog" class="dialog-head">
       <div class="tabs" role="tablist">
-        <button type="button" class="tab active" data-tab="grbl" role="tab">Machine (GRBL)</button>
-        <button type="button" class="tab" data-tab="app" role="tab">Application</button>
-        <button type="button" class="tab" data-tab="keys" role="tab">Keyboard</button>
+        <button title="GRBL's own settings ($$), stored in the controller's EEPROM" type="button" class="tab active" data-tab="grbl" role="tab">Machine (GRBL)</button>
+        <button title="GCSender settings kept on the server: polling, jogging, jobs, spindle, profiles" type="button" class="tab" data-tab="app" role="tab">Application</button>
+        <button title="Keyboard shortcuts" type="button" class="tab" data-tab="keys" role="tab">Keyboard</button>
+        <button title="Theme, colours, 3D view and layout options (this browser only)" type="button" class="tab" data-tab="display" role="tab">Display</button>
       </div>
       <button class="close" value="close" title="Close">✕</button>
     </form>
@@ -372,19 +378,61 @@
       </div>
       <div class="dialog-foot">
         <span id="grbl-settings-status" class="muted small"></span>
-        <button type="button" id="grbl-settings-reload">Reload</button>
-        <button type="button" id="grbl-settings-save" class="primary" disabled>Write changes</button>
+        <a id="grbl-settings-backup" class="button-like" href="#" download="grbl-settings.txt" title="Download the current $$ values as a text file (a backup; lines can be pasted into the console to restore)">Back up $$</a>
+        <button title="Read $$ from the controller again" type="button" id="grbl-settings-reload">Reload</button>
+        <button title="Write the changed values to GRBL ($n=value each); only possible while Idle" type="button" id="grbl-settings-save" class="primary" disabled>Write changes</button>
+      </div>
+    </section>
+    <section class="tab-body" data-tab-body="display" hidden>
+      <p class="muted small">Display preferences are kept in this browser only.</p>
+      <form id="display-form" class="form-grid">
+        <label for="disp-theme">Theme</label>
+        <select id="disp-theme" name="theme"><option value="auto">follow the system</option><option value="light">light</option><option value="dark">dark</option></select>
+        <label for="disp-layoutLock">Lock the layout<br><span class="muted small">No collapsing panels or dragging the dividers.</span></label>
+        <input id="disp-layoutLock" name="layoutLock" type="checkbox">
+        <label for="disp-largeTouch">Larger buttons (touch)<br><span class="muted small">On by default on touch screens.</span></label>
+        <select id="disp-largeTouch" name="largeTouch"><option value="auto">automatic</option><option value="on">on</option><option value="off">off</option></select>
+        <h3 class="form-head">3D view</h3>
+        <label for="disp-showGrid">Grid</label><input id="disp-showGrid" name="showGrid" type="checkbox">
+        <label for="disp-showRapids">Rapid moves (G0)</label><input id="disp-showRapids" name="showRapids" type="checkbox">
+        <label for="disp-showTrail">Tool trail</label><input id="disp-showTrail" name="showTrail" type="checkbox">
+        <label for="disp-trailLength">Trail length (points)</label><input id="disp-trailLength" name="trailLength" type="number" min="100" max="50000" step="100">
+        <label for="disp-toolDiameter">Tool model diameter / angle (mm, °)</label>
+        <span class="pair"><input id="disp-toolDiameter" name="toolDiameter" type="number" min="0.1" max="20" step="0.1"><input id="disp-toolAngle" name="toolAngle" type="number" min="1" max="180" step="1"></span>
+        <label for="disp-antialias">Antialiasing<br><span class="muted small">Applies after a page reload.</span></label><input id="disp-antialias" name="antialias" type="checkbox">
+        <span>Colours: feed · rapid · plunge</span>
+        <span class="colors"><input type="color" name="colFeed" title="Feed moves"><input type="color" name="colRapid" title="Rapid moves"><input type="color" name="colPlunge" title="Z-only feed moves (plunges)"></span>
+        <span>done · in GRBL's buffer · selected</span>
+        <span class="colors"><input type="color" name="colDone" title="Executed lines"><input type="color" name="colBuffer" title="Lines in GRBL's buffers"><input type="color" name="colSelected" title="The selected line"></span>
+        <span>tool · trail</span>
+        <span class="colors"><input type="color" name="colTool" title="Tool model"><input type="color" name="colTrail" title="Tool trail"></span>
+      </form>
+      <p class="muted small">WebGL draws lines one pixel wide in most browsers, so line width is not adjustable.</p>
+      <div class="dialog-foot">
+        <span id="display-status" class="muted small"></span>
+        <button title="Restore every display preference to its default" type="button" id="display-reset">Restore defaults</button>
       </div>
     </section>
     <section class="tab-body" data-tab-body="keys" hidden>
-      <p class="muted small">Keyboard jogging must be enabled on the Jog panel. Keys are physical key positions, so they work with any layout. Esc (stop) always works.</p>
+      <p class="muted small">Shortcuts work when <i>keyboard</i> is ticked on the Jog panel and you are not typing in a field; Esc (stop) always works. Keys are physical key positions, so they work with any layout. Click a key to remove it. Actions that move the machine only work while connected.</p>
       <table class="settings-table"><tbody id="keymap-body"></tbody></table>
       <div class="dialog-foot">
         <span id="keymap-status" class="muted small"></span>
-        <button type="button" id="keymap-reset">Restore defaults</button>
+        <button title="Restore the default keyboard shortcuts" type="button" id="keymap-reset">Restore defaults</button>
       </div>
     </section>
     <section class="tab-body" data-tab-body="app" hidden>
+      <div class="profile-bar">
+        <label for="profile-select" class="small">Profile</label>
+        <select id="profile-select" title="Saved sets of application settings and user commands"><option value="">—</option></select>
+        <button type="button" id="profile-load" title="Apply the selected profile">Load</button>
+        <button type="button" id="profile-save" title="Save the current settings and user commands as a profile">Save as…</button>
+        <button type="button" id="profile-delete" title="Delete the selected profile">Delete</button>
+        <span class="spacer"></span>
+        <a id="settings-export" class="button-like" href="#" download="gcsender-settings.json" title="Download settings, user commands and a copy of $$">Export</a>
+        <label class="button-like" title="Load settings (and user commands) from an exported file">Import…<input type="file" id="settings-import" accept=".json,application/json" hidden></label>
+        <button type="button" id="settings-defaults" title="Restore every application setting to its default (user commands are kept)">Defaults</button>
+      </div>
       <form id="app-settings-form" class="form-grid">
         <label for="app-statusInterval">Status query period (ms)</label>
         <input id="app-statusInterval" name="statusInterval" type="number" min="50" max="2000" step="10">
@@ -434,7 +482,7 @@
       </form>
       <div class="dialog-foot">
         <span id="app-settings-status" class="muted small"></span>
-        <button type="button" id="app-settings-save" class="primary">Save</button>
+        <button title="Save the application settings on the server" type="button" id="app-settings-save" class="primary">Save</button>
       </div>
     </section>
   </dialog>
@@ -448,24 +496,72 @@
       <p class="muted small">One G-code line per row, sent in order (each must be acknowledged before the next). <code>{expr}</code> inserts a value: <code>wx wy wz</code> work position, <code>mx my mz</code> machine position, <code>prbx prby prbz</code> last probe contact (machine), <code>safez</code>; with <code>+ - * /</code>, <code>min() max() abs()</code>, e.g. <code>G0 Z{max(safez, wz + 2)}</code>. A line using a position waits for Idle first; <code>wait idle</code> waits explicitly. Comments: <code>;</code> or <code>( )</code>.</p>
       <div id="macro-list" class="macro-list"></div>
       <div class="dialog-foot">
-        <button type="button" id="macro-add">Add</button>
+        <button title="Add a new user command" type="button" id="macro-add">Add</button>
         <span id="macro-edit-status" class="muted small"></span>
-        <button type="button" id="macro-save" class="primary">Save</button>
+        <button title="Check and save all user commands" type="button" id="macro-save" class="primary">Save</button>
       </div>
+    </section>
+  </dialog>
+
+  <dialog id="dlg-help" class="dialog help">
+    <form method="dialog" class="dialog-head">
+      <strong>GCSender help</strong>
+      <button class="close" value="close" title="Close">✕</button>
+    </form>
+    <section class="tab-body help-body">
+      <nav class="help-toc small">
+        <a href="#h-start">Getting started</a> · <a href="#h-jog">Jogging</a> · <a href="#h-zero">Work zero</a> ·
+        <a href="#h-probe">Probing &amp; heightmaps</a> · <a href="#h-job">Jobs</a> · <a href="#h-recover">Recovery</a> ·
+        <a href="#h-macros">User commands</a> · <a href="#h-keys">Keyboard</a> · <a href="#h-safety">Safety</a> · <a href="#h-trouble">Troubleshooting</a>
+      </nav>
+      <h3 id="h-start">Getting started</h3>
+      <p>The <code>gcsender</code> server owns the serial port; this page is only a window onto it. Reloading or closing the page never stops the machine, and any number of pages can be open. Pick the port (the C3018 shows as a CH340 / <i>usbserial</i> device) at 115200 baud and press <b>Connect</b>. GCSender reads <code>$G</code>, <code>$$</code>, <code>$#</code> and <code>$I</code>, and warns if <code>$10</code> or <code>$13</code> need changing.</p>
+      <p>The state badge shows Idle, Run, Hold, Door, Alarm… <b>Unlock</b> (<code>$X</code>) clears an alarm, <b>Hold</b>/<b>Resume</b> pause and continue, <b>Door</b> acts like the safety-door input, <b>Reset</b> stops everything (offsets and the parser state are restored afterwards).</p>
+      <h3 id="h-jog">Jogging</h3>
+      <p>Jogging is in steps only: each click or key press moves exactly the chosen step (0.01 to 10 mm) at the chosen feed. Holding a key or button never repeats, so the machine cannot run on. Separate presses queue. A step that would leave the optional jog box (<i>Settings → Application</i>) is refused rather than shortened. <b>Esc</b> stops all motion.</p>
+      <h3 id="h-zero">Work zero</h3>
+      <p>Jog to the work origin and use <b>X0</b>, <b>Y0</b>, <b>Z0</b>, <b>XY0</b> or <b>All 0</b> (<code>G10 L20</code>, kept in GRBL's EEPROM). Tick <i>temporary (G92)</i> for an offset that a reset clears. <b>Go XY0</b> and <b>Go Z0</b> move there, raising to safe Z first.</p>
+      <h3 id="h-probe">Probing &amp; heightmaps</h3>
+      <p><b>Probe Z</b> touches off on a plate (thickness in the panel), optionally twice (fast, then slow), and sets work Z. <b>Test</b> checks the probe input first: the probe must read open, then touching when you close the clip on the plate.</p>
+      <p>For PCB work set a <b>heightmap</b> border (or <b>Auto</b> from a G-code file) and grid, then <b>Probe map</b>. The first point is the reference (Z0); every other point is relative to it. With a map loaded, tick <b>heightmap</b> in the Program panel to stream the compensated program; the server computes it. Maps can be saved, loaded and exchanged with Candle (<code>.map</code>).</p>
+      <h3 id="h-job">Jobs</h3>
+      <p><b>Open…</b> (or drop a file) uploads a program to the server's library. <b>Start</b> runs it; <b>Pause</b> is a feed hold; <b>Stop</b> holds, resets and restores the offsets. To restart part-way, click a line in the table (or type it in <i>from line</i>): the server restores the program state at that line, raises to safe Z, moves above the start, starts the spindle with a dwell and plunges slowly. In the table and the 3D view, grey is done and violet is in GRBL's buffers.</p>
+      <p>On an <b>M6</b> the job stops and asks for the tool change. Jogging and probing are allowed, then press <b>Continue</b>. On an <b>error</b> the machine is held and you choose Continue or Stop. The feed slider is an override: on GRBL 0.9 it takes effect after the moves already buffered (up to about 17).</p>
+      <h3 id="h-recover">Recovery</h3>
+      <p>If the server stops or the USB link drops mid-job, the job comes back as <b>interrupted</b>. If the board was <i>not</i> reset, GCSender finds where it stopped and offers <b>Resume here</b>. If it was reset, the position is lost: re-establish work zero (and Z, at the heightmap origin if you use one), tick the two boxes and <b>Resume with safe entry</b>. Check the suggested line before resuming.</p>
+      <h3 id="h-macros">User commands</h3>
+      <p>Buttons on the Machine tab run G-code on the server. <code>{expr}</code> inserts values: <code>wx wy wz</code>, <code>mx my mz</code>, <code>prbx prby prbz</code>, <code>safez</code>, with <code>+ - * /</code> and <code>min max abs</code>. <code>wait idle</code> waits for the moves to finish. Esc stops a command.</p>
+      <h3 id="h-keys">Keyboard</h3>
+      <p>Shortcuts other than Esc work when <i>keyboard</i> is ticked on the Jog panel and you are not typing in a field. Change them in <i>Settings → Keyboard</i>.</p>
+      <table class="settings-table small"><tbody id="help-keys"></tbody></table>
+      <h3 id="h-safety">Safety</h3>
+      <ul>
+        <li>The red Stop and Esc are software stops. Keep the machine's power switch or an E-stop within reach.</li>
+        <li>Air-cut a new program (Z raised) before cutting. Check bounds in the Program panel against your stock.</li>
+        <li>GRBL 0.9 cannot cancel a single move; a long move runs to its end unless you Hold or Reset.</li>
+      </ul>
+      <h3 id="h-trouble">Troubleshooting</h3>
+      <ul>
+        <li><b>ALARM after connecting:</b> homing is enabled (<code>$22=1</code>); home or <b>Unlock</b>.</li>
+        <li><b>No position in the State panel:</b> set <code>$10=3</code> (GCSender offers this).</li>
+        <li><b>Probe never triggers:</b> use <b>Test</b>; check the clip and the A5 / probe pin wiring.</li>
+        <li><b>The board resets when the server starts:</b> normal for this board (DTR). See Recovery.</li>
+        <li>Everything sent and received is in <b>Logs → Serial transcripts</b>.</li>
+      </ul>
     </section>
   </dialog>
 
   <dialog id="dlg-logs" class="dialog">
     <form method="dialog" class="dialog-head">
       <div class="tabs" role="tablist">
-        <button type="button" class="tab active" data-tab="app-log" role="tab">Application log</button>
-        <button type="button" class="tab" data-tab="transcripts" role="tab">Serial transcripts</button>
+        <button title="Recent messages from the GCSender server" type="button" class="tab active" data-tab="app-log" role="tab">Application log</button>
+        <button title="Daily files of everything exchanged with GRBL" type="button" class="tab" data-tab="transcripts" role="tab">Serial transcripts</button>
       </div>
       <button class="close" value="close" title="Close">✕</button>
     </form>
     <section class="tab-body" data-tab-body="app-log">
       <div class="table-wrap"><table class="log-table mono small"><tbody id="app-log-body"></tbody></table></div>
-      <div class="dialog-foot"><button type="button" id="app-log-refresh">Refresh</button></div>
+      <div class="dialog-foot"><button title="Fetch the latest log messages" type="button" id="app-log-refresh">Refresh</button></div>
     </section>
     <section class="tab-body" data-tab-body="transcripts" hidden>
       <p class="muted small">Everything exchanged with the controller, one file per day (in the server's state directory).</p>
