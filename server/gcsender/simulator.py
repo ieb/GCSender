@@ -946,7 +946,7 @@ class GrblSimulator:
         scale = 25.4 if units == 20 else 1.0
         axes = {k: vals[k] * scale for k in "XYZ" if k in vals}
 
-        sync_needed = any(c in (3, 4, 5, 7, 8, 9) for c in ms) or any(
+        sync_needed = any(c in (0, 3, 4, 5, 7, 8, 9) for c in ms) or any(
             g in ("4", "10", "28", "28.1", "30", "30.1", "38.2", "38.3", "38.4", "38.5", "43.1", "92", "92.1") for g in gs
         )
 
@@ -966,6 +966,9 @@ class GrblSimulator:
                 elif mcode in (0, 1):
                     m.program = f"M{mcode}"
             self._gcode_motion(gs, vals, axes, distance, jog)
+            if 0 in ms:
+                # M0 program pause: GRBL holds once the planner has emptied (cycle start resumes).
+                self._feed_hold()
 
         if sync_needed and self._busy():
             # GRBL synchronises the planner before these commands.

@@ -39,6 +39,14 @@ SCHEMA: dict[str, tuple[type, Any, float | None, float | None]] = {
     "probeBackoff": (float, 1.0, 0.1, 10.0),  # lift between the fast and slow touch
     "probeRetract": (float, 2.0, 0.0, 50.0),  # lift after probing
     "probeSetZero": (bool, True, None, None),
+    # Jobs
+    "ignoreErrors": (bool, False, None, None),  # keep streaming after an error (ALARM always stops)
+    "jobStartCommands": (str, "", None, None),  # sent before a job (newline or ';' separated)
+    "jobEndCommands": (str, "M5", None, None),  # sent after a job completes
+    "toolChangeMode": (str, "pause", None, None),  # pause | ignore  (M6 handling)
+    "toolChangeCommands": (str, "M5", None, None),  # sent when pausing for a tool change
+    "spindleDwell": (float, 3.0, 0.0, 60.0),  # seconds to spin up when starting from a line
+    "entryPlungeFeed": (float, 100.0, 1.0, 5000.0),  # max feed for the plunge when starting from a line (mm/min)
     # Heightmap transform
     "arcTolerance": (float, 0.01, 0.001, 0.5),  # max chord error when arcs are linearised (mm)
 }
@@ -81,6 +89,12 @@ def validate(key: str, value: Any) -> Any:
     elif typ is str:
         if not isinstance(value, str) or len(value) > 256:
             raise SettingsError(f"{key} must be a string")
+        if key == "toolChangeMode" and value not in ("pause", "ignore"):
+            raise SettingsError("toolChangeMode must be 'pause' or 'ignore'")
+        if key in ("jobStartCommands", "jobEndCommands", "toolChangeCommands") and any(
+            ord(c) > 0x7E or (ord(c) < 0x20 and c not in "\n\r") for c in value
+        ):
+            raise SettingsError(f"{key} may contain only printable ASCII G-code")
         if key in NUMBER_LISTS:
             try:
                 nums = [float(x) for x in value.split(",") if x.strip()]

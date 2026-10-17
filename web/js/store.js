@@ -49,6 +49,7 @@ export function createStore() {
         state.heightmap = r.heightmap || null;
         state.probe = r.probe || null;
         state.sim = r.sim || null;
+        state.job = r.job || null;
         state.console = (data.console || []).slice(-CONSOLE_LIMIT);
         emit("snapshot");
         return;
@@ -68,6 +69,7 @@ export function createStore() {
       case "heightmap":
       case "probe":
       case "sim":
+      case "job":
         state[type] = data;
         emit(type, data);
         return;

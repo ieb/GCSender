@@ -13,6 +13,7 @@ import { initWcs, initSpindle } from "./ui/panels.js";
 import { initVisualizer } from "./view/visualizer.js";
 import { initLeftTabs, initProbe, initHeightmap } from "./ui/heightmap.js";
 import { initSim } from "./ui/sim.js";
+import { initBottomTabs, initJob } from "./ui/job.js";
 
 const store = createStore();
 const log = initConsole(store);
@@ -29,6 +30,8 @@ initLeftTabs();
 initProbe(store, log);
 initHeightmap(store, log, view);
 initSim(store, log);
+initBottomTabs();
+initJob(store, log, view);
 
 const stream = new EventStream({
   onEvent: (type, data) => store.apply(type, data),

@@ -27,10 +27,13 @@ export class ApiError extends Error {
   }
 }
 
-export async function request(method, path, body) {
+export async function request(method, path, body, { raw = false } = {}) {
   const headers = { "X-GCS-Token": token || "" };
   const init = { method, headers, cache: "no-store" };
-  if (body !== undefined) {
+  if (body !== undefined && raw) {
+    headers["Content-Type"] = "text/plain";
+    init.body = body; // a File/Blob/string sent as-is (program upload)
+  } else if (body !== undefined) {
     headers["Content-Type"] = "application/json";
     init.body = JSON.stringify(body);
   }
@@ -89,6 +92,22 @@ export const api = {
   heightmapDelete: (name) => request("POST", "/api/heightmap/library/delete", { name }),
   heightmapOrigin: () => request("POST", "/api/heightmap/origin", {}),
   heightmapTransform: (gcode) => request("POST", "/api/heightmap/transform", { gcode }),
+  jobUpload: (file) => request("POST", "/api/jobs?" + new URLSearchParams({ name: file.name }), file, { raw: true }),
+  jobs: () => request("GET", "/api/jobs"),
+  jobDelete: (id) => request("DELETE", "/api/jobs/" + encodeURIComponent(id)),
+  jobSelect: (jobId) => request("POST", "/api/job/select", { jobId }),
+  jobUnload: () => request("POST", "/api/job/unload", {}),
+  jobHeightmap: (enabled) => request("POST", "/api/job/heightmap", { enabled }),
+  jobStart: (fromLine = 0) => request("POST", "/api/job/start", { fromLine }),
+  jobPause: () => request("POST", "/api/job/pause", {}),
+  jobResume: () => request("POST", "/api/job/resume", {}),
+  jobStop: () => request("POST", "/api/job/stop", {}),
+  jobOverride: (kind, value) => request("POST", "/api/job/override", { kind, value }),
+  async jobText() {
+    const res = await fetch("/api/job/text", { headers: { "X-GCS-Token": token || "" }, cache: "no-store" });
+    if (!res.ok) throw new ApiError(res.status, res.statusText);
+    return res.text();
+  },
   simProbe: (forced) => request("POST", "/api/sim/probe", { forced }),
   simSurface: (changes) => request("PUT", "/api/sim/surface", changes),
 };

@@ -333,3 +333,36 @@ input.narrow { width: 56px; }
 @media (max-width: 760px) {
   .layout { grid-template-columns: 1fr; }
 }
+
+/* -- program / job (P4) -------------------------------------------------- */
+.bottom-tabs { margin-bottom: -10px; z-index: 1; }
+.bottom-tabs .tab { padding: 4px 12px; }
+.bottom-panel { height: 320px; flex-shrink: 0; display: flex; flex-direction: column; gap: 6px; border-top-left-radius: 0; }
+.bottom-panel[hidden] { display: none; }
+#panel-console .console-out { flex: 1; height: auto; }
+.job-bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.job-bar .spacer { flex: 1; }
+.job-bar input.num { width: 72px; }
+.job-bar input[type=range] { width: 110px; vertical-align: middle; }
+.job-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40%; }
+.job-progress { display: flex; align-items: center; gap: 8px; }
+.job-progress .bar { flex: 1; height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; }
+.job-progress .fill { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+.job-progress .fill.done { background: var(--ok); }
+.job-progress .fill.bad { background: var(--danger); }
+.job-prompt { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 4px; background: var(--warn); color: #111; font-weight: 600; }
+.job-prompt[hidden] { display: none; }
+.job-prompt span { flex: 1; }
+.job-table { flex: 1; min-height: 60px; overflow-y: auto; position: relative; border: 1px solid var(--border); border-radius: 4px; font-size: 12px; outline: none; }
+.job-table .rows { position: absolute; left: 0; right: 0; top: 0; }
+.job-table .row { display: grid; grid-template-columns: 56px 1fr 120px; height: 20px; line-height: 20px; padding: 0 6px; cursor: pointer; white-space: nowrap; }
+.job-table .row > span { overflow: hidden; text-overflow: ellipsis; }
+.job-table .row .n { color: var(--muted); text-align: right; padding-right: 10px; }
+.job-table .row.done { color: var(--muted); }
+.job-table .row.buffer { background: rgba(150, 70, 220, .16); }
+.job-table .row.err { background: rgba(220, 40, 40, .18); }
+.job-table .row.sel { outline: 1px solid #e0a800; outline-offset: -1px; background: rgba(255, 190, 0, .15); }
+.job-table .row.from .n::before { content: "▶ "; color: var(--ok); }
+#job-library { max-width: 180px; }
+.job-table .row.queued { background: rgba(150, 70, 220, .08); }
+.form-grid textarea { width: 220px; resize: vertical; font-size: 12px; }

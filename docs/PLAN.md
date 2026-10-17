@@ -137,8 +137,8 @@ Legend:
 |---|---|---|---|
 | Spindle on/off, speed field and slider, min/max | 🟡 | `M3 S…`/`M5` in Idle. In Hold only on 1.1 (`0x9E`): 0.9 blocks the parser on spindle changes until the planner empties | P2 ✅ |
 | Change S during a job | 🟡 | Server injects into the stream | P4 |
-| Feed override | 🟡 | 0.9: the server rewrites `F` as lines leave (UI notes the lag). 1.1: real-time | P4 |
-| Rapid and spindle override | ❌ | 1.1 real-time only (0.9 S rewrite: Later) | P4 (1.1) |
+| Feed override | 🟡 | 0.9: the server rewrites `F` as lines leave (UI notes the lag). 1.1: real-time | P4 ✅ |
+| Rapid and spindle override | ❌ | 1.1 real-time only (0.9 S rewrite: Later) | P4 ✅ (1.1) |
 
 ### 3.4 Jogging
 **Decision: step jogging only.** A click or key press moves exactly the selected step. Deliberate presses may queue, but a long press on a key or mouse button is always exactly one step. Continuous (hold-to-move) jogging is deliberately **not provided**, from Candle, bCNC or anywhere else. On a 0.9 machine any overrun past the intended point hits the workpiece and can damage the tool (§5.4).
@@ -182,23 +182,23 @@ Legend:
 ### 3.8 Program / job
 | Candle feature | 0.9 | Implementation | Phase |
 |---|---|---|---|
-| Open file (button/drag-drop), recent files | ✅ | Single upload `POST /api/jobs`. The server keeps a job library on disk | P4 |
-| Table: #, command, state, response | ✅ | Virtualised table. States come from SSE `job.progress` (sent/acked ranges) plus a per-line errors list | P4 |
-| Send / Pause / Stop / Reset | ✅ | `POST /api/job/start|pause|resume|stop` | P4 |
-| Send from selected line with parser-state restore | ✅ | Server replays modal state, then safe entry (Z up, XY, spindle plus dwell, plunge) | P4 |
-| Start/end commands, M6 pause and tool-change commands, ignore errors | ✅ | Server sender settings. M6 pauses the job and raises an SSE `job.toolchange` prompt | P4 |
-| Auto-scroll; elapsed time and ETA; completion notice | ✅ | Server estimator (`$110–$122`); SPA notification and sound | P4 |
+| Open file (button/drag-drop), recent files | ✅ | Single upload `POST /api/jobs` (raw text, ≤ 50 MB). The server keeps a job library on disk (`<state>/jobs`) | P4 ✅ |
+| Table: #, command, state, response | ✅ | Virtualised table (50k+ lines). Row states from the retained `job` event: done (executed), queued (acknowledged, in GRBL's planner), sent (awaiting ack), error | P4 ✅ |
+| Send / Pause / Stop / Reset | ✅ | `POST /api/job/start|pause|resume|stop`; Stop is the safe stop (hold, reset, restore; no alarm) | P4 ✅ |
+| Send from selected line with parser-state restore | ✅ | Server replays modal state, then safe entry (Z up, XY, spindle plus dwell, plunge at ≤ `entryPlungeFeed`). Refused if the program used G92 before the line or the position is unknown | P4 ✅ |
+| Start/end commands, M6 pause and tool-change commands, ignore errors | ✅ | Server sender settings. M6 (never sent to GRBL) waits for Idle, runs the tool-change commands and pauses in `toolchange`; jog and probe are allowed until Continue. An error feed-holds and asks (Continue/Stop) unless "ignore errors"; an ALARM always ends the job | P4 ✅ |
+| Auto-scroll; elapsed time and ETA; completion notice | ✅ | Server estimator (GRBL planner model: `$11`, `$110–$122`, junction deviation, trapezoids); the remaining time is corrected by the measured ratio. SPA tone and console notice | P4 ✅ |
 | Edit lines with undo/redo; New | ✅ | | Later |
 | Canned-cycle expansion G81–G83 *(bCNC)* | n/a | Server-side expansion | Later |
 
 ### 3.9 Visualizer (SPA, WebGL)
 | Candle feature | 0.9 | Implementation | Phase |
 |---|---|---|---|
-| Toolpath: solid feed, dashed rapids, red Z moves | ✅ | SPA parser (display only) on the exact text the server sends. Needs a loaded program, so it moved with job upload | P4 |
-| Progress colours (done = grey, in buffer = violet); markers start/end/selected | ✅ | line → vertex-range map | P4 |
+| Toolpath: solid feed, dashed rapids, red Z moves | ✅ | SPA parser (display only, arcs linearised) on the exact text the server sends. Rapids are drawn faint rather than dashed (WebGL 1 has no line stipple) | P4 ✅ |
+| Progress colours (done = grey, in buffer = violet); markers start/end/selected | ✅ | line → vertex-range map; progress recolours by drawing ranges with a tint (no re-upload) | P4 ✅ |
 | Origin, axes, tool model, live tool position | ✅ | Plus a grid, the jog box and a tool trail | P2 ✅ |
 | Orbit/pan/zoom, Top/Front/Left/Iso, Fit, perspective/ortho | ✅ | | P2 ✅ |
-| Bounds info, machine bounds box, arc segment settings | ✅ | | P4 |
+| Bounds info, machine bounds box, arc segment settings | ✅ | Bounds shown in the program panel; the jog box is drawn (P2) | P4 ✅ |
 | Raster/grayscale (laser) mode | ✅ | | Later |
 | Visual settings (colours, line width, AA) | ✅ | | P6 |
 
@@ -279,7 +279,9 @@ web/                    served as the SPA
   - The server stores it, parses it, and computes bounds, ETA and modal snapshots every 1,000 lines (for fast send-from-line).
   - It returns `{jobId, lines, bounds, eta}`.
 - **Variants:** `original` and `transformed` (heightmap). The **active variant's text is exactly what is streamed**. The SPA renders the same text, so line indices match 1:1.
-- **Progress events** (throttled ~10 Hz): `{sentLine, ackedLine, elapsed, eta, state}`, plus immediate `job.error`, `job.toolchange`, `job.done`.
+- **Progress events:** one retained `job` event (throttled ~10 Hz, immediate on state changes) carrying `{state, sent, acked, executing, errors, heldError, toolchange, override, elapsed, eta}`. States: `idle, ready, starting, running, paused, error, toolchange, done, stopped, failed`. Being retained, it is what a reloaded SPA sees, so there are no separate one-shot events to miss.
+- **Executing line:** GRBL acknowledges a line when it enters the planner, up to 17 moves before it runs. The runner replays the planner timeline (each acknowledged line starts when the previous one ends and takes its estimated time; the clock stops during a hold; never more than the planner depth behind). The ETA, the "done" colouring and the "stopped at line" message use that line, not the last `ok`.
+- **Pipelining:** lines are sent whenever they fit in the RX budget, without waiting for the previous `ok`. Measured on the simulator: 50,004 lines at ~670 lines/s sustained (above what 115200 baud can carry); at real-time speed the planner stays full (17/17) throughout. `ok` lines from the job are not echoed to the console; errors are, with the failing command.
 - **Feed override:** on 0.9 the `F` words are rewritten as lines leave the queue (the UI says it takes effect after up to 17 blocks). On 1.1 the server sends real-time bytes.
 
 ### 5.4 Jog and stop
@@ -370,12 +372,12 @@ POST     /api/heightmap/auto   {gcode, margin}   POST /api/heightmap/probe   POS
 GET      /api/heightmap/interpolated            GET /api/heightmap/export (.map)   POST /api/heightmap/import {text}
 GET      /api/heightmap/library  POST /api/heightmap/library/save|load|delete {name}
 POST     /api/heightmap/transform {gcode} → {gcode, stats}  (P4 uses it for the job's transformed variant)
-POST /api/jobs                 raw G-code body, ?name= → {jobId, lines, bounds, eta}
-GET  /api/jobs                 library     GET /api/jobs/{id}?variant=original|transformed (text)
-POST /api/job/select           {jobId}     POST /api/job/heightmap {enabled}
-POST /api/job/start            {fromLine?}  POST /api/job/pause|resume|stop
-POST /api/job/override         {feed%, spindle%?, rapid%?}
-POST /api/job/toolchange/continue
+POST /api/jobs                 raw G-code body, ?name= → {id, name, lines, size} (selected when no job runs)
+GET  /api/jobs                 library     DELETE /api/jobs/{id}
+GET  /api/job                  state       GET /api/job/text (active variant, exactly what is streamed)
+POST /api/job/select           {jobId}     POST /api/job/unload     POST /api/job/heightmap {enabled}
+POST /api/job/start            {fromLine?}  POST /api/job/pause|resume|stop  (resume = Continue after an error or tool change)
+POST /api/job/override         {kind: feed|rapid|spindle, value: %}
 GET/PUT /api/grbl/settings     $$ parsed / {id: value}
 GET/PUT /api/settings          app (server-side) settings
 GET/PUT /api/macros            user commands      POST /api/macros/{id}/run
@@ -430,7 +432,7 @@ GET  /api/logs/serial          transcript download
 | **P1 Connect, monitor, console** ✅ (simulator) | Ports/connect, protocol parsing for both firmwares, capabilities, machine model, State/Control panels, console, `$$` editor and `$10` check, error/alarm text, reset with restore, serial transcript | On the real C3018: Idle with MPos/WPos; Hold/Resume/Reset/Unlock; `$$` round-trip; same on the 1.1 simulator. **Hardware check deferred** (no machine access yet). Verified on the 0.9j and 1.1f simulators, configured with the user's `$$` |
 | **P2 Jog, WCS, spindle, 3D** ✅ (simulator) | Step-only jog (no continuous mode), keyboard map, hard stop, WCS select/zero, G92, go-to, spindle/coolant, WebGL view with live tool and camera controls | Each step moves exactly its size, for every default size; a held key or button is one step; deliberate presses queue and sum exactly; a step that would leave the jog box (checked at the end of the queue) or that would follow non-jog motion is refused; Esc stop gives no alarm and keeps offsets. Verified on the 0.9j/1.1f simulators (tests in `test_phase2.py`). **Hardware check deferred** |
 | **P3 Probe & heightmap** ✅ (simulator) | Z probe (single/two-stage), probe test, heightmap create/auto/probe/edit/library, `.map` v3 I/O, bicubic, server transform + cache, SPA surface render, transformed-program fetch | A 5×4 map on the machine; `.map` interop with Candle; a reload mid-probe continues; the transformed job's Z verified on a test PCB. Simulator: a 5×4 map matches the simulated warped surface within 2 µm; a reload mid-run continues (browser-verified); `.map` files in Candle's layout read and write; transform verified by an independent interpreter (lines, arcs, G91, G20, G92). **Hardware check deferred**, and `.map` interop to be confirmed with a file saved by Candle itself |
-| **P4 Jobs & streaming** | Upload/library, server parser + estimator, streamer job runner, pause/stop/from-line with restore, start/end commands, M6 flow, overrides, SPA program table + progress colouring + markers + bounds + ETA | A 50k-line job streams without stalls; a reload mid-job shows correct progress; ETA within ±15 % |
+| **P4 Jobs & streaming** ✅ (simulator) | Upload/library, server parser + estimator, streamer job runner, pause/stop/from-line with restore, start/end commands, M6 flow, overrides, SPA program table + progress colouring + markers + bounds + ETA | A 50k-line job streams without stalls; a reload mid-job shows correct progress; ETA within ±15 %. Simulator: 50,004 lines streamed at ~670 lines/s with the planner full at real-time speed; a reload mid-job shows the same line, colours and ETA (browser-verified); ETA within ±15 % of the simulated run with the estimator given the simulator's constant-speed model (tests in `test_phase4.py`). **Hardware check deferred**: the ±15 % ETA on the real machine (acceleration, junctions) |
 | **P5 Recovery & user commands** | Journal, start-up recovery (re-attach and post-reset paths), macros panel and engine, notifications | Killing and restarting the server mid-job on the simulator (reset and no-reset modes) recovers as specified |
 | **P6 Polish** | Settings UI and profiles, shortcuts editor, layout (collapse/resize), visual settings, theme, help, door command | Usable on desktop and tablet widths |
 | **Later** | Line editing/undo, camera, orient/align, transform G-code, canned cycles, centre finder, TLO re-probe on M6, laser view, S-rewrite override on 0.9, re-probe selected points | — |
@@ -453,6 +455,7 @@ GET  /api/logs/serial          transcript download
   - Does opening the port reset the board (banner seen)?
   - Does Hold → Reset leave the position intact with no alarm on the real 0.9j?
   - P3: probe input test open/touching (does the 0.9j board alarm on an already-triggered probe and clear with `$X`?); Z probe with and without a plate against a known height; a 5×4 map on a PCB blank; load the `.map` in Candle and a Candle `.map` here; cut a shallow test isolation pattern with the compensated file.
+  - P4: air-cut a job of a few thousand short segments: no stutter (planner starvation) at 115200 baud; ETA against the actual time (±15 %); Pause/Resume and Stop mid-move (no alarm, position kept); an M6 pause, jog, Continue; start from a mid-program line (air) and check the entry moves; 0.9 software feed override takes effect after the buffered moves.
   - P2: measure 0.01/0.1/1/10 mm steps with a dial indicator (also checks `$100–$102`); a held key or mouse button moves one step only; five quick presses move exactly five steps; Esc mid-move (no alarm, offsets kept, position unchanged against a reference mark); `G10 L20` zeroing; go-to with safe Z; `M3 S…` speed scaling against `spindleMax` (0.9j build default 1000); keyboard jog in Chrome/Safari/Firefox.
 - **DTR reset on server (re)start:** inherent to the CH340 + 328P board. It only matters if the server restarts mid-job; disabling auto-reset (a 10 µF cap RESET–GND) makes that case seamless too. Both paths are supported.
 - **Software feed-override lag** on 0.9 is documented in the UI; it is not a safety control. Continuous jogging, the other overrun risk, is excluded by design (§5.4). The hardware E-stop remains the real stop.

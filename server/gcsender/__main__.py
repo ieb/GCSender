@@ -14,6 +14,8 @@ from .events import EventBus
 from .logs import LogRing, Transcript
 from .heightmap.model import MapLibrary
 from .heightmap.service import HeightmapService
+from .jobs.library import JobLibrary
+from .jobs.runner import JobRunner
 from .probe import Prober
 from .simulator import GrblSimulator, parse_surface_spec
 from .store import SettingsStore
@@ -91,9 +93,10 @@ def main(argv: list[str] | None = None) -> int:
     controller = Controller(bus, make_transport, settings=settings, transcript=transcript)
     maps = HeightmapService(bus, MapLibrary(state_dir))
     prober = Prober(controller, maps)
+    jobs = JobRunner(controller, maps, JobLibrary(state_dir))
     router = build_router(
         bus, controller, simulator=args.simulate, transcript=transcript, log_ring=log_ring,
-        maps=maps, prober=prober, sim=sim,
+        maps=maps, prober=prober, sim=sim, jobs=jobs,
     )
     lan = args.lan or host not in ("127.0.0.1", "localhost", "::1")
     try:

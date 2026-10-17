@@ -6,18 +6,19 @@ over HTTP and server-sent events, so reloading or closing the page never interru
 
 See [docs/PLAN.md](docs/PLAN.md) for the full plan, feature inventory and phases.
 
-**Status:** phases 0–3 are complete, verified on the simulator only; the hardware check is still deferred.
+**Status:** phases 0–4 are complete, verified on the simulator only; the hardware check is still deferred.
 - Working: connection and firmware detection (fresh boot or re-attach), live status, and the console with error help.
 - Control: Hold, Resume, Reset (with offset and parser-state restore), Unlock and Check.
 - Jogging: step only. Each click or key press moves exactly 0.01, 0.05, 0.1, 0.5, 1, 5 or 10 mm. A long press is always one step (no auto-repeat), and there is no hold-to-move mode. Keys are remappable and Esc stops. There is an optional jog box.
 - Coordinates: G54–G59 select/zero, G92, and go-to with safe Z. Spindle and coolant controls.
 - Probing: Z probe (plate, two-stage), probe-input test for GRBL 0.9.
 - Heightmaps: probe a grid, edit values, save/load a library, import/export Candle `.map` files, and compensate a G-code file on the server (download and 3D preview).
-- 3D view: grid, axes, tool and trail, heightmap surface and the compensated path, with orbit/pan/zoom and preset views.
+- Jobs: upload (button or drag-drop) to a server-side library, then Start / Pause / Stop, start from any line (safe entry), M6 tool-change pause (jog and probe allowed), error hold with Continue/Stop, start/end commands, and feed override (software on 0.9, real-time feed/rapid/spindle on 1.1). The server streams the job, so a page reload shows the job exactly where it is. Run the heightmap-compensated version with one checkbox.
+- 3D view: grid, axes, tool and trail, the program (feed, rapids, plunges) coloured by progress, start/end markers and the selected line, the heightmap surface, and the compensated path, with orbit/pan/zoom and preset views.
 - Settings: GRBL `$$` editor with warnings for `$10`/`$13`, and app settings.
 - Logs: application log and serial transcripts.
 
-Job upload and streaming come in phase 4.
+Next: phase 5 (journal and recovery after a *server* restart mid-job, user commands/macros).
 
 **Jogging is step only, by design.** Continuous (hold-to-move) jogging is deliberately not provided: GRBL 0.9 cannot cancel a jog,
 so any overrun would go into the workpiece. Separate presses queue and run in order; holding a key or button never produces more than one step.
@@ -60,6 +61,15 @@ The simulator has a virtual workpiece surface. Its probe input closes when the t
 - **Readout:** the surface height under the tool. **5 mm above surface** moves there, ready for *Probe Z*.
 
 A quick tour: *5 mm above surface* → *Probe Z* → set a map border → *Probe map*. Add `--sim-speed 10` to make it ten times faster.
+
+### Running a job
+1. **Open…** (or drop a file on the Program panel) uploads it to the server's library (`<state-dir>/jobs`); **Library…** reloads earlier uploads.
+2. Tick **heightmap** to stream the compensated program instead (recomputed at Start if the map has changed).
+3. **Start** runs from line 1, or from the **from line** number (click a table row to pick one). Starting mid-program restores the modal state, raises to safe Z, moves to the start XY, starts the spindle with a dwell, and plunges at no more than the *entry plunge feed*.
+4. Progress in the table and 3D view: grey is done, violet is in GRBL's buffers. The ETA comes from a model of GRBL's planner using your `$110–$122` and `$11`, corrected as the job runs.
+5. **On an M6** the job waits for the machine to stop, runs the *tool-change commands* (default `M5`), and asks. You can jog and probe Z, then **Continue**. **On an error** the machine is feed-held and you choose Continue or Stop. Both are set in *Settings → Application → Jobs*.
+
+The simulator moves at constant speed (no acceleration), so its run times are shorter than the estimate. The ETA on the real machine is a deferred hardware check.
 | `--state-dir DIR` | Settings and serial transcripts (default `~/.gcsender`) |
 
 ## Security

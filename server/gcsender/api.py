@@ -11,6 +11,8 @@ from .events import EventBus
 from . import operations as ops
 from .heightmap.model import MapError
 from .heightmap.service import HeightmapService
+from .jobs.library import MAX_JOB_BYTES, JobError
+from .jobs.runner import JobRunner
 from .probe import Prober
 from .simulator import SURFACE_PRESETS, SurfaceParams
 from .logs import LogRing, Transcript
@@ -30,6 +32,8 @@ def _wrap(fn: Callable[[Request], Any]) -> Callable[[Request], Any]:
             raise ApiError(e.status, str(e)) from None
         except MapError as e:
             raise ApiError(409, str(e)) from None
+        except JobError as e:
+            raise ApiError(404 if "no such" in str(e) else 400, str(e)) from None
         except SettingsError as e:
             raise ApiError(400, str(e)) from None
 
@@ -45,6 +49,7 @@ def build_router(
     log_ring: LogRing | None = None,
     maps: HeightmapService | None = None,
     prober: Prober | None = None,
+    jobs: JobRunner | None = None,
     sim: Any = None,
 ) -> Router:
     r = Router()
@@ -300,6 +305,78 @@ def build_router(
             return result
         return {"gcode": result["gcode"], "stats": result["stats"]}
 
+    # -- jobs ----------------------------------------------------------------------
+
+    def _jobs() -> JobRunner:
+        if jobs is None:
+            raise ApiError(503, "jobs unavailable")
+        return jobs
+
+    def jobs_upload(req: Request) -> Any:
+        data = req.body(MAX_JOB_BYTES)
+        if not data:
+            raise ApiError(400, "empty program")
+        name = (req.query.get("name") or ["program.nc"])[0]
+        meta = _jobs().library.add(name, data)
+        if not _jobs().active:
+            _jobs().select(meta["id"])
+        return meta
+
+    def jobs_list(_req: Request) -> Any:
+        return {"jobs": _jobs().library.list()}
+
+    def jobs_delete(req: Request) -> Any:
+        j = _jobs()
+        if j.meta and j.meta["id"] == req.params["id"]:
+            j.unload()
+        j.library.delete(req.params["id"])
+        return {"jobs": j.library.list()}
+
+    def job_state(_req: Request) -> Any:
+        return _jobs().snapshot()
+
+    def job_text(_req: Request) -> Any:
+        return RawResponse(_jobs().text().encode(), "text/plain; charset=utf-8", None)
+
+    def job_select(req: Request) -> Any:
+        job_id = req.json().get("jobId")
+        if not isinstance(job_id, str):
+            raise ApiError(400, "jobId is required")
+        return _jobs().select(job_id)
+
+    def job_unload(_req: Request) -> Any:
+        _jobs().unload()
+        return _jobs().snapshot()
+
+    def job_heightmap(req: Request) -> Any:
+        return _jobs().set_heightmap(_flag(req.json(), "enabled", False))
+
+    def job_start(req: Request) -> Any:
+        body = req.json()
+        line = body.get("fromLine", 0)
+        if isinstance(line, bool) or not isinstance(line, int):
+            raise ApiError(400, "fromLine must be a line index")
+        return _jobs().start(line)
+
+    def job_pause(_req: Request) -> Any:
+        _jobs().pause()
+        return _jobs().snapshot()
+
+    def job_resume(_req: Request) -> Any:
+        _jobs().resume()
+        return _jobs().snapshot()
+
+    def job_stop(_req: Request) -> Any:
+        return _jobs().stop()
+
+    def job_override(req: Request) -> Any:
+        body = req.json()
+        kind = body.get("kind", "feed")
+        value = body.get("value")
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ApiError(400, "value must be a percentage")
+        return _jobs().set_override(kind, int(value))
+
     # -- simulator (only with --simulate) ----------------------------------------
 
     def _sim() -> Any:
@@ -439,6 +516,19 @@ def build_router(
     add("POST", "/api/heightmap/library/delete", hm_delete)
     add("POST", "/api/heightmap/origin", hm_origin)
     add("POST", "/api/heightmap/transform", hm_transform)
+    add("POST", "/api/jobs", jobs_upload)
+    add("GET", "/api/jobs", jobs_list)
+    add("DELETE", "/api/jobs/{id}", jobs_delete)
+    add("GET", "/api/job", job_state)
+    add("GET", "/api/job/text", job_text)
+    add("POST", "/api/job/select", job_select)
+    add("POST", "/api/job/unload", job_unload)
+    add("POST", "/api/job/heightmap", job_heightmap)
+    add("POST", "/api/job/start", job_start)
+    add("POST", "/api/job/pause", job_pause)
+    add("POST", "/api/job/resume", job_resume)
+    add("POST", "/api/job/stop", job_stop)
+    add("POST", "/api/job/override", job_override)
     add("GET", "/api/sim", sim_get)
     add("POST", "/api/sim/probe", sim_probe)
     add("PUT", "/api/sim/surface", sim_surface)

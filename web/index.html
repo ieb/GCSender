@@ -269,7 +269,47 @@
           <div class="overlay center muted" id="vis-fallback" hidden>WebGL is not available in this browser.</div>
         </div>
       </section>
-      <section class="panel" id="panel-console">
+      <div class="tabs bottom-tabs" role="tablist">
+        <button type="button" class="tab active" data-bottom="program" role="tab">Program <span id="job-tab-badge" class="small muted"></span></button>
+        <button type="button" class="tab" data-bottom="console" role="tab">Console</button>
+      </div>
+      <section class="panel bottom-panel" id="panel-program" data-bottom-body="program">
+        <div class="job-bar">
+          <label class="button-like" title="Upload a G-code file to the server (it is kept in the job library)">Open…<input type="file" id="job-file" accept=".nc,.gcode,.ngc,.tap,.cnc,.txt,.gc,.g" hidden></label>
+          <select id="job-library" title="Job library on the server"><option value="">Library…</option></select>
+          <button type="button" id="job-unload" title="Unload the program">✕</button>
+          <span id="job-name" class="job-name mono"></span>
+          <label title="Stream the heightmap-compensated program (computed on the server)"><input type="checkbox" id="job-heightmap"> heightmap</label>
+        </div>
+        <div class="job-bar">
+          <button type="button" id="job-start" class="primary" title="Start the job (from the line below)">▶ Start</button>
+          <button type="button" id="job-pause" title="Feed hold / resume">⏸ Pause</button>
+          <button type="button" id="job-stop" class="danger" title="Stop: feed hold, then reset; offsets are restored">■ Stop</button>
+          <label title="Start from this line: the server restores the modal state and enters safely (safe Z, XY, spindle + dwell, plunge)">from line <input type="number" id="job-from" min="1" value="1" class="num"></label>
+          <span class="spacer"></span>
+          <label id="job-ov-feed-wrap" title="Feed override">feed <input type="range" id="job-ov-feed" min="10" max="200" step="10" value="100"> <output id="job-ov-feed-val" class="mono">100%</output></label>
+          <span id="job-ov-rt" hidden>
+            <label title="Rapid override (GRBL 1.1)">rapid <select id="job-ov-rapid"><option>100</option><option>50</option><option>25</option></select></label>
+            <label title="Spindle override (GRBL 1.1)">spindle <input type="range" id="job-ov-spindle" min="10" max="200" step="10" value="100"> <output id="job-ov-spindle-val" class="mono">100%</output></label>
+          </span>
+        </div>
+        <div class="job-progress">
+          <div class="bar"><div id="job-bar" class="fill"></div></div>
+          <span id="job-progress-text" class="mono small"></span>
+        </div>
+        <div id="job-prompt" class="job-prompt" hidden>
+          <span id="job-prompt-text"></span>
+          <button type="button" id="job-continue" class="primary">Continue</button>
+          <button type="button" id="job-prompt-stop" class="danger">Stop job</button>
+        </div>
+        <div id="job-info" class="small muted"></div>
+        <div id="job-table" class="job-table mono" tabindex="0" aria-label="Program lines">
+          <div id="job-table-spacer" class="spacer-rows"></div>
+          <div id="job-table-rows" class="rows"></div>
+        </div>
+        <label class="small muted"><input type="checkbox" id="job-autoscroll" checked> follow progress</label>
+      </section>
+      <section class="panel bottom-panel" id="panel-console" data-bottom-body="console" hidden>
         <h2>
           <span>Console</span>
           <span class="console-tools">
@@ -346,6 +386,21 @@
           <input type="number" step="1" data-i="2"><input type="number" step="1" data-i="3">
           <input type="number" step="1" data-i="4"><input type="number" step="1" data-i="5">
         </span>
+        <h3 class="form-head">Jobs</h3>
+        <label for="app-ignoreErrors">Keep streaming after an error<br><span class="muted small">Off: the job feed-holds on an error and asks. An ALARM always ends the job.</span></label>
+        <input id="app-ignoreErrors" name="ignoreErrors" type="checkbox">
+        <label for="app-jobStartCommands">Commands before a job<br><span class="muted small">One per line.</span></label>
+        <textarea id="app-jobStartCommands" name="jobStartCommands" rows="2" class="mono" spellcheck="false"></textarea>
+        <label for="app-jobEndCommands">Commands after a job completes</label>
+        <textarea id="app-jobEndCommands" name="jobEndCommands" rows="2" class="mono" spellcheck="false"></textarea>
+        <label for="app-toolChangeMode">On M6 (tool change)<br><span class="muted small">GRBL does not accept M6; the server handles it.</span></label>
+        <select id="app-toolChangeMode" name="toolChangeMode"><option value="pause">pause and ask</option><option value="ignore">ignore</option></select>
+        <label for="app-toolChangeCommands">Commands before the tool-change pause<br><span class="muted small">e.g. M5, then raise Z (G53 G0 Z… once homed).</span></label>
+        <textarea id="app-toolChangeCommands" name="toolChangeCommands" rows="2" class="mono" spellcheck="false"></textarea>
+        <label for="app-spindleDwell">Spindle spin-up dwell when starting from a line (s)</label>
+        <input id="app-spindleDwell" name="spindleDwell" type="number" min="0" max="60" step="0.5">
+        <label for="app-entryPlungeFeed">Maximum plunge feed when starting from a line (mm/min)</label>
+        <input id="app-entryPlungeFeed" name="entryPlungeFeed" type="number" min="1" step="10">
         <h3 class="form-head">Spindle</h3>
         <label for="app-spindleMin">Minimum speed (S)</label>
         <input id="app-spindleMin" name="spindleMin" type="number" min="0" step="1">

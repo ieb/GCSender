@@ -95,6 +95,7 @@ class Controller:
         self.busy: str | None = None  # e.g. "probing": console/UI/jog commands are refused
         self.stop_hooks: list[Callable[[], None]] = []  # called on Stop and Reset (abort routines)
         self.jogger: Any = None  # set by Jogger(controller)
+        self.job_runner: Any = None  # set by JobRunner(controller, ...)
         self._tasks: queue.Queue[Callable[[], None] | None] = queue.Queue()
         self._stop = threading.Event()
         self._publish_connection()
@@ -515,10 +516,12 @@ class Controller:
             src = p.source if p else None
             if ln.kind == "error":
                 info = explain_error(ln.data["text"], ln.data["code"])
+                if src == "job" and p is not None:
+                    self._console("tx", p.line, "job")  # job lines are not echoed; show the failing one
                 self._console("rx", ln.raw, src, help=info["help"], title=info["title"])
                 if src != "system":
                     log.info("controller error for %r: %s", p.line if p else None, ln.raw)
-            else:
+            elif src != "job":  # a job's thousands of ok's would bury everything else
                 self._console("rx", ln.raw, src)
             if self._settings_dirty:
                 self._settings_dirty = False

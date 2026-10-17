@@ -5,6 +5,7 @@ import { api } from "../api.js";
 import { $, $$, fmt } from "../ui/dom.js";
 import { OrbitCamera } from "./camera.js";
 import { LineBatch, Renderer } from "./gl.js";
+import { parseProgram } from "./gcode.js";
 
 const TRAIL_MAX = 5000;
 const DARK = window.matchMedia("(prefers-color-scheme: dark)");
@@ -14,7 +15,16 @@ function palette() {
     ? { grid: [1, 1, 1, 0.07], grid10: [1, 1, 1, 0.16], bounds: [0.6, 0.7, 0.8, 0.5], tool: [1, 0.6, 0.15, 1], trail: [0.45, 0.65, 1, 0.9] }
     : { grid: [0, 0, 0, 0.07], grid10: [0, 0, 0, 0.18], bounds: [0.3, 0.35, 0.45, 0.55], tool: [0.95, 0.5, 0.05, 1], trail: [0.2, 0.35, 0.85, 0.9] };
 }
-const NOOP_VIEW = { setHeightmap() {}, setPreview() {} };
+const NOOP_VIEW = { setHeightmap() {}, setPreview() {}, setProgram() {}, setProgress() {}, setSelected() {} };
+// Toolpath colours (Candle-like): feed, rapid, plunge; progress tints done / in GRBL's buffer.
+const PATH = {
+  feed: [0.1, 0.45, 0.85, 0.95],
+  rapid: [0.55, 0.55, 0.55, 0.45],
+  plunge: [0.85, 0.2, 0.2, 0.95],
+  done: [0.6, 0.6, 0.6, 0.55],
+  buffer: [0.6, 0.25, 0.85, 1],
+  selected: [1, 0.75, 0, 1],
+};
 
 // Blue (low) -> green -> red (high).
 function heat(t, alpha = 1) {
@@ -23,44 +33,6 @@ function heat(t, alpha = 1) {
   const g = 1 - Math.abs(2 * t - 1) * 0.8;
   const b = Math.max(0, Math.min(1, 1.5 - 2 * t));
   return [r, g * 0.85, b, alpha];
-}
-
-// Minimal G-code path reader for previews (G0/G1; arcs drawn as chords).
-export function readPath(text) {
-  const rapids = [];
-  const feeds = [];
-  let mm = true;
-  let abs = true;
-  let motion = 0;
-  const pos = [null, null, null];
-  for (const raw of text.split(/\r?\n/)) {
-    const code = raw.replace(/\([^)]*\)/g, "").split(";")[0].toUpperCase();
-    if (!code.trim()) continue;
-    const words = [...code.matchAll(/([A-Z])\s*([-+]?(?:\d+\.?\d*|\.\d+))/g)].map((m) => [m[1], Number(m[2])]);
-    const gs = words.filter((w) => w[0] === "G").map((w) => w[1]);
-    if (gs.includes(20)) mm = false;
-    if (gs.includes(21)) mm = true;
-    if (gs.includes(90)) abs = true;
-    if (gs.includes(91)) abs = false;
-    for (const g of gs) if ([0, 1, 2, 3].includes(g)) motion = g;
-    if (gs.some((g) => [53, 28, 30, 92, 10, 38.2, 38.3, 38.4, 38.5].includes(g))) {
-      for (const [l] of words) { const i = "XYZ".indexOf(l); if (i >= 0) pos[i] = null; }
-      continue;
-    }
-    const start = [...pos];
-    let moved = false;
-    for (const [l, v] of words) {
-      const i = "XYZ".indexOf(l);
-      if (i < 0) continue;
-      const mmv = mm ? v : v * 25.4;
-      pos[i] = abs ? mmv : (pos[i] === null ? null : pos[i] + mmv);
-      moved = true;
-    }
-    if (moved && start.every((v) => v !== null) && pos.every((v) => v !== null)) {
-      (motion === 0 ? rapids : feeds).push([start, [...pos]]);
-    }
-  }
-  return { rapids, feeds };
 }
 
 const AXIS = { x: [0.86, 0.15, 0.15, 1], y: [0.1, 0.65, 0.2, 1], z: [0.15, 0.35, 0.9, 1] };
@@ -97,6 +69,8 @@ export function initVisualizer(store) {
   }
   const cam = new OrbitCamera();
   const trail = []; // machine coordinates
+  let program = null; // loaded job: {segments, lineStart, bounds, lines}
+  let progress = { acked: -1, sent: -1 };
   let wco = [0, 0, 0];
   let tool = null; // work coordinates
   let fitted = false;
@@ -110,7 +84,7 @@ export function initVisualizer(store) {
   function draw() {
     frame = 0;
     const aspect = canvas.clientWidth / Math.max(1, canvas.clientHeight);
-    renderer.draw(cam.matrix(aspect), ["grid", "bounds", "hm-surface", "hm-points", "preview", "axes", "trail", "tool"]);
+    renderer.draw(cam.matrix(aspect), ["grid", "bounds", "hm-surface", "hm-points", "program", "program-sel", "preview", "markers", "axes", "trail", "tool"]);
   }
 
   function limitsWork() {
@@ -130,6 +104,7 @@ export function initVisualizer(store) {
     if (lim) { grow(lim[0]); grow(lim[1]); }
     if (hmBox) { grow(hmBox[0]); grow(hmBox[1]); }
     if (previewBox) { grow(previewBox[0]); grow(previewBox[1]); }
+    if (program?.bounds) { grow(program.bounds[0]); grow(program.bounds[1]); }
     return { min, max };
   }
 
@@ -243,14 +218,10 @@ export function initVisualizer(store) {
     const b = new LineBatch();
     previewBox = null;
     if (text) {
-      const { rapids, feeds } = readPath(text);
-      const lo = [Infinity, Infinity, Infinity];
-      const hi = [-Infinity, -Infinity, -Infinity];
-      for (const [a, c] of [...rapids, ...feeds]) for (const pt of [a, c]) for (let i = 0; i < 3; i++) { lo[i] = Math.min(lo[i], pt[i]); hi[i] = Math.max(hi[i], pt[i]); }
-      if (Number.isFinite(lo[0])) previewBox = [lo, hi];
+      const parsed = parseProgram(text);
+      previewBox = parsed.bounds;
       const rc = DARK.matches ? [0.7, 0.7, 0.7, 0.35] : [0.4, 0.4, 0.4, 0.35];
-      for (const [a, c] of rapids) b.line(a, c, rc);
-      for (const [a, c] of feeds) b.line(a, c, [0.1, 0.55, 0.3, 0.95]);
+      for (const sg of parsed.segments) b.line(sg.a, sg.b, sg.kind === "rapid" ? rc : [0.1, 0.55, 0.3, 0.95]);
     }
     renderer.upload("preview", b);
     staticKey = "";
@@ -367,5 +338,72 @@ export function initVisualizer(store) {
     request();
   });
   request();
-  return { setHeightmap, setPreview };
+  // -- the loaded program, its progress and the selected line ------------------
+
+  function setProgram(text) {
+    const b = new LineBatch();
+    const m = new LineBatch();
+    program = null;
+    if (text) {
+      program = parseProgram(text);
+      for (const sg of program.segments) b.line(sg.a, sg.b, PATH[sg.kind]);
+      const segs = program.segments;
+      if (segs.length) {
+        const s = 1.2;
+        const first = segs[0].a;
+        const last = segs[segs.length - 1].b;
+        const ring = (c, col) => {
+          const pts = [];
+          for (let k = 0; k <= 16; k++) pts.push([c[0] + s * Math.cos(k * Math.PI / 8), c[1] + s * Math.sin(k * Math.PI / 8), c[2]]);
+          m.polyline(pts, col);
+        };
+        ring(first, [0.1, 0.7, 0.2, 1]); // start: green ring
+        ring(last, [0.86, 0.15, 0.15, 1]); // end: red ring
+      }
+    }
+    renderer.upload("program", b);
+    renderer.upload("markers", m);
+    renderer.upload("program-sel", new LineBatch());
+    applyProgress();
+    staticKey = "";
+    rebuildStatic();
+    if (text) fit();
+    request();
+  }
+
+  // Vertex index where line i starts (2 vertices per segment).
+  const vAt = (i) => (program ? 2 * program.lineStart[Math.max(0, Math.min(program.lines, i))] : 0);
+
+  function applyProgress() {
+    if (!program) return;
+    const total = 2 * program.segments.length;
+    const done = vAt(progress.acked + 1);
+    const sent = Math.max(done, vAt(progress.sent + 1));
+    renderer.setRanges("program", [
+      { first: 0, count: done, tint: PATH.done },
+      { first: done, count: sent - done, tint: PATH.buffer },
+      { first: sent, count: total - sent, tint: null },
+    ]);
+  }
+
+  function setProgress(acked, sent) {
+    if (progress.acked === acked && progress.sent === sent) return;
+    progress = { acked, sent };
+    applyProgress();
+    request();
+  }
+
+  function setSelected(line) {
+    const b = new LineBatch();
+    if (program && line !== null && line >= 0) {
+      for (let k = program.lineStart[line]; k < program.lineStart[line + 1]; k++) {
+        const sg = program.segments[k];
+        b.line(sg.a, sg.b, PATH.selected);
+      }
+    }
+    renderer.upload("program-sel", b);
+    request();
+  }
+
+  return { setHeightmap, setPreview, setProgram, setProgress, setSelected };
 }

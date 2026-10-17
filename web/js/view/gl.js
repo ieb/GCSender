@@ -14,7 +14,9 @@ void main() {
 const FS = `
 precision mediump float;
 varying vec4 vColor;
-void main() { gl_FragColor = vColor; }`;
+uniform vec4 uTint;
+uniform float uUseTint;
+void main() { gl_FragColor = mix(vColor, vec4(uTint.rgb, uTint.a * vColor.a), uUseTint); }`;
 
 function compile(gl, type, src) {
   const s = gl.createShader(type);
@@ -58,6 +60,8 @@ export class Renderer {
     this.aColor = gl.getAttribLocation(prog, "aColor");
     this.uMvp = gl.getUniformLocation(prog, "uMvp");
     this.uOffset = gl.getUniformLocation(prog, "uOffset");
+    this.uTint = gl.getUniformLocation(prog, "uTint");
+    this.uUseTint = gl.getUniformLocation(prog, "uUseTint");
     this.buffers = new Map(); // name -> {pos, col, count}
   }
 
@@ -73,6 +77,14 @@ export class Renderer {
     gl.bindBuffer(gl.ARRAY_BUFFER, b.col);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(batch.colors), gl.DYNAMIC_DRAW);
     b.count = batch.count;
+    b.ranges = null;
+  }
+
+  // Draw only these vertex ranges, each in its own colour (tint null = vertex colours).
+  // [{first, count, tint}] - lets job progress recolour without re-uploading.
+  setRanges(name, ranges) {
+    const b = this.buffers.get(name);
+    if (b) b.ranges = ranges;
   }
 
   setOffset(name, offset) {
@@ -116,7 +128,19 @@ export class Renderer {
       gl.bindBuffer(gl.ARRAY_BUFFER, b.col);
       gl.enableVertexAttribArray(this.aColor);
       gl.vertexAttribPointer(this.aColor, 4, gl.FLOAT, false, 0, 0);
-      gl.drawArrays(gl.LINES, 0, b.count);
+      if (!b.ranges) {
+        gl.uniform1f(this.uUseTint, 0);
+        gl.drawArrays(gl.LINES, 0, b.count);
+        continue;
+      }
+      for (const r of b.ranges) {
+        const first = Math.max(0, Math.min(b.count, r.first));
+        const count = Math.max(0, Math.min(b.count - first, r.count));
+        if (!count) continue;
+        gl.uniform1f(this.uUseTint, r.tint ? 1 : 0);
+        if (r.tint) gl.uniform4fv(this.uTint, r.tint);
+        gl.drawArrays(gl.LINES, first, count);
+      }
     }
   }
 }
