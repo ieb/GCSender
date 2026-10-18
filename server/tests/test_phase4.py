@@ -231,7 +231,7 @@ def test_m6_pauses_for_tool_change_and_allows_jogging(rig):
     load(jobs, "G21 G90\nM3 S500\nG0 X0 Y0 Z1\nG1 X5 F600\nT2 M6\nG0 Z1\nG1 X10 F600\n")
     jobs.start()
     wait_for(lambda: jobs.state == "toolchange")
-    assert jobs.toolchange == {"line": 4, "tool": 2}
+    assert jobs.toolchange == {"line": 4, "tool": 2, "kind": "M6", "message": None}
     assert sim.pos[2] == pytest.approx(20) and sim.modal.spindle == "M5"
     ctl.jogger.step([0, 0, -1], 300)  # the user may jog during a tool change
     wait_for(lambda: not sim.planner and sim.state == "Idle")
@@ -365,9 +365,9 @@ def test_m0_program_pause_can_be_resumed_from_the_job(rig):
     sim, ctl, _maps, jobs = rig()
     load(jobs, "G21 G90\nG0 X0 Y0 Z0\nG1 X2 F600\nM0\nG1 X4\n")
     jobs.start()
-    wait_for(lambda: ctl.model.status["state"] == "Hold" and jobs.state == "running")
-    with pytest.raises(ControllerError, match="Resume"):
-        jobs.pause()
+    # The server pauses at the M0 itself (GRBL stays Idle, so jogging works).
+    wait_for(lambda: jobs.state == "toolchange" and (jobs.toolchange or {}).get("kind") == "M0")
+    assert ctl.model.status["state"] == "Idle" and sim.pos[0] == pytest.approx(2)
     jobs.resume()
     assert finished(jobs) == "done"
     assert sim.pos[0] == pytest.approx(4)

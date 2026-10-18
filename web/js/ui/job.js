@@ -341,9 +341,13 @@ export function initJob(store, log, view) {
       $("#job-prompt-text").textContent = `Error at line ${j.heldError.line + 1} (${j.heldError.command}): ${j.heldError.response}. The machine is in feed hold.`;
       $("#job-continue").textContent = "Continue";
     } else if (st === "toolchange") {
-      const t = j.toolchange?.tool;
+      const tc = j.toolchange || {};
+      const line = (tc.line ?? 0) + 1;
       prompt.hidden = false;
-      $("#job-prompt-text").textContent = `Tool change at line ${(j.toolchange?.line ?? 0) + 1}: fit tool ${t ?? "?"}. You may jog and probe Z now, then press Continue. The program continues from where the machine is now.`;
+      const head = tc.kind === "M0" || tc.kind === "M1"
+        ? `${tc.kind === "M0" ? "Program pause (M0)" : "Optional stop (M1)"} at line ${line}${tc.message ? `: “${tc.message}”` : ""}.`
+        : `Tool change at line ${line}: fit tool ${tc.tool ?? "?"}.`;
+      $("#job-prompt-text").textContent = `${head} You may jog and probe Z now, then press Continue. The program continues from where the machine is now.`;
       $("#job-continue").textContent = "Continue";
     } else {
       prompt.hidden = true;
@@ -357,6 +361,7 @@ export function initJob(store, log, view) {
     }
     if (v?.tooLong?.length) info.push(`⚠ line ${v.tooLong[0] + 1} is too long for GRBL`);
     if (v?.m6Lines?.length) info.push(`${v.m6Lines.length} tool change${v.m6Lines.length > 1 ? "s" : ""}`);
+    if (v?.pauses?.length) info.push(`${v.pauses.length} pause${v.pauses.length > 1 ? "s" : ""} (M0/M1)`);
     if (j?.heightmap?.stale) info.push("heightmap changed: recomputed at start");
     if (v?.stats?.warnings?.length) info.push(`⚠ ${v.stats.warnings[0]}`);
     $("#job-info").textContent = info.join(" · ");

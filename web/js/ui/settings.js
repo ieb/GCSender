@@ -17,7 +17,7 @@ export function initTabs(dialog) {
 const APP_FIELDS = [
   "statusInterval", "restoreAfterReset", "resetOnConnect", "autoConnect", "transcriptStatus",
   "jogSteps", "jogFeeds", "safeZ", "jogLimitsEnabled", "spindleMin", "spindleMax",
-  "ignoreErrors", "jobStartCommands", "jobEndCommands", "toolChangeMode", "toolChangeCommands",
+  "ignoreErrors", "jobStartCommands", "jobEndCommands", "toolChangeMode", "toolChangeCommands", "optionalStop",
   "spindleDwell", "entryPlungeFeed",
 ];
 

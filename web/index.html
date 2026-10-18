@@ -472,6 +472,8 @@
         <select id="app-toolChangeMode" name="toolChangeMode"><option value="pause">pause and ask</option><option value="ignore">ignore</option></select>
         <label for="app-toolChangeCommands">Commands before the tool-change pause<br><span class="muted small">e.g. M5, then raise Z (G53 G0 Z… once homed).</span></label>
         <textarea id="app-toolChangeCommands" name="toolChangeCommands" rows="2" class="mono" spellcheck="false"></textarea>
+        <label for="app-optionalStop">Pause at M1 (optional stop)<br><span class="muted small">M0 always pauses and shows the program's (MSG, …) text; jogging and probing are allowed while paused. Off: M1 is skipped.</span></label>
+        <input id="app-optionalStop" name="optionalStop" type="checkbox">
         <label for="app-spindleDwell">Spindle spin-up dwell when starting from a line (s)</label>
         <input id="app-spindleDwell" name="spindleDwell" type="number" min="0" max="60" step="0.5">
         <label for="app-entryPlungeFeed">Maximum plunge feed when starting from a line (mm/min)</label>
@@ -554,7 +556,7 @@
       <p>For PCB work set a <b>heightmap</b> border (or <b>Auto</b> from a G-code file) and grid, then <b>Probe map</b>. The first point is the reference (Z0); every other point is relative to it. With a map loaded, tick <b>heightmap</b> in the Program panel to stream the compensated program; the server computes it. Maps can be saved, loaded and exchanged with Candle (<code>.map</code>).</p>
       <h3 id="h-job">Jobs</h3>
       <p><b>Open…</b> (or drop a file) uploads a program to the server's library. <b>Start</b> runs it; <b>Pause</b> is a feed hold; <b>Stop</b> holds, resets and restores the offsets. To restart part-way, click a line in the table (or type it in <i>from line</i>): the server restores the program state at that line, raises to safe Z, moves above the start, starts the spindle with a dwell and plunges slowly. In the table and the 3D view, grey is done and violet is in GRBL's buffers.</p>
-      <p>On an <b>M6</b> the job stops and asks for the tool change. Jogging and probing are allowed, then press <b>Continue</b>. On an <b>error</b> the machine is held and you choose Continue or Stop. The feed slider is an override: on GRBL 0.9 it takes effect after the moves already buffered (up to about 17).</p>
+      <p>On an <b>M6</b>, or an <b>M0</b>/<b>M1</b> program pause (CAM tools often write a tool change as <code>(MSG, …)</code> + <code>M0</code>; its message is shown), the job stops and asks. Jogging and probing are allowed, then press <b>Continue</b>. On an <b>error</b> the machine is held and you choose Continue or Stop. The feed slider is an override: on GRBL 0.9 it takes effect after the moves already buffered (up to about 17).</p>
       <h3 id="h-recover">Recovery</h3>
       <p>If the server stops or the USB link drops mid-job, the job comes back as <b>interrupted</b>. If the board was <i>not</i> reset, GCSender finds where it stopped and offers <b>Resume here</b>. If it was reset, the position is lost: re-establish work zero (and Z, at the heightmap origin if you use one), tick the two boxes and <b>Resume with safe entry</b>. Check the suggested line before resuming.</p>
       <h3 id="h-macros">User commands</h3>

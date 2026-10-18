@@ -45,6 +45,7 @@ SCHEMA: dict[str, tuple[type, Any, float | None, float | None]] = {
     "jobEndCommands": (str, "M5", None, None),  # sent after a job completes
     "toolChangeMode": (str, "pause", None, None),  # pause | ignore  (M6 handling)
     "toolChangeCommands": (str, "M5", None, None),  # sent when pausing for a tool change
+    "optionalStop": (bool, True, None, None),  # M1 pauses like M0 (off: M1 is skipped)
     "spindleDwell": (float, 3.0, 0.0, 60.0),  # seconds to spin up when starting from a line
     "entryPlungeFeed": (float, 100.0, 1.0, 5000.0),  # max feed for the plunge when starting from a line (mm/min)
     # Heightmap transform

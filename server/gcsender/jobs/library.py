@@ -17,6 +17,28 @@ from .estimate import Machine, estimate
 MAX_JOB_BYTES = 50 << 20
 ID_RE = re.compile(r"^[0-9a-f]{12}$")
 M6_RE = re.compile(r"M0*6(?![0-9.])")
+PAUSE_RE = re.compile(r"M0*([01])(?![0-9.])")  # M0 program pause, M1 optional stop
+MSG_RE = re.compile(r"\(\s*MSG\s*,\s*(.*?)\s*\)", re.IGNORECASE)
+MSG_LOOKBACK = 10
+
+
+def find_pauses(raw: list[str], cmds: list[str]) -> list[dict[str, Any]]:
+    """M0/M1 lines with the operator message: a ``(MSG, ...)`` comment on the
+    line or on one of the few lines before it (CAM tools put it just before)."""
+    out: list[dict[str, Any]] = []
+    for i, c in enumerate(cmds):
+        m = PAUSE_RE.search(c)
+        if not m:
+            continue
+        message = None
+        lo = max(out[-1]["line"] + 1 if out else 0, i - MSG_LOOKBACK)
+        for j in range(i, lo - 1, -1):
+            mm = MSG_RE.search(raw[j])
+            if mm:
+                message = mm.group(1)
+                break
+        out.append({"line": i, "code": f"M{m.group(1)}", "message": message})
+    return out
 
 
 class JobError(ValueError):
@@ -40,6 +62,7 @@ class Variant:
     bounds: dict[str, Any] | None = None
     too_long: list[int] = field(default_factory=list)
     m6_lines: list[int] = field(default_factory=list)
+    pauses: list[dict[str, Any]] = field(default_factory=list)  # M0/M1 with their (MSG, ...)
     g92: bool = False
     digest: str = ""
     map_digest: str | None = None  # transformed: heightmap it was built from
@@ -53,6 +76,7 @@ class Variant:
         v.digest = hashlib.sha256(text.encode()).hexdigest()[:16]
         v.too_long = [i for i, c in enumerate(cmds) if len(c) > max_line][:100]
         v.m6_lines = [i for i, c in enumerate(cmds) if M6_RE.search(c)]
+        v.pauses = find_pauses(raw, cmds)
         v.seconds = estimate(cmds, machine)
         total = 0.0
         v.cum = []
@@ -81,6 +105,7 @@ class Variant:
             "bounds": self.bounds,
             "tooLong": self.too_long,
             "m6Lines": self.m6_lines[:100],
+            "pauses": self.pauses[:100],
             "g92": self.g92,
             "mapDigest": self.map_digest,
             "stats": self.stats,

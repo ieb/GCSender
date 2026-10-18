@@ -34,11 +34,12 @@ from ..streamer import StreamerError
 from .analyze import Scanner, state_before
 from .estimate import Machine
 from .journal import Journal
-from .library import M6_RE, JobError, JobLibrary, Variant
+from .library import M6_RE, PAUSE_RE, JobError, JobLibrary, Variant
 
 log = logging.getLogger(__name__)
 
 PUBLISH_INTERVAL = 0.1
+TICK_INTERVAL = 0.25
 F_WORD = re.compile(r"F[-+]?(?:\d+\.?\d*|\.\d+)")
 ACTIVE = ("running", "paused", "error", "toolchange", "starting")
 FINAL = ("done", "stopped", "failed")
@@ -88,6 +89,8 @@ class JobRunner:
         self._stop = False
         self._continue = threading.Event()
         self._last_pub = 0.0
+        self._pub_pending = False
+        self._pub_lock = threading.RLock()  # publish/journal/executing from the job, ticker and HTTP threads
         self._ov_force_f = False
         self._scanner: Scanner | None = None
         # GRBL acks a line when it enters the planner, up to ~17 moves before it
@@ -120,6 +123,10 @@ class JobRunner:
 
     def executing(self) -> int:
         """Best guess of the last line GRBL has finished executing."""
+        with self._pub_lock:
+            return self._executing()
+
+    def _executing(self) -> int:
         if self.state not in ("running", "paused", "error", "starting"):
             return self.acked
         now = self._frozen_at if self._frozen_at is not None else time.monotonic()
@@ -196,14 +203,26 @@ class JobRunner:
         self.journal = None
 
     def _publish(self, force: bool = False) -> None:
-        if self._dead:
-            return
-        now = time.monotonic()
-        if not force and now - self._last_pub < PUBLISH_INTERVAL:
-            return
-        self._last_pub = now
-        self.ctl.bus.publish("job", self.snapshot(), retain=True)
-        self._journal()
+        with self._pub_lock:
+            if self._dead:
+                return
+            now = time.monotonic()
+            if not force and now - self._last_pub < PUBLISH_INTERVAL:
+                self._pub_pending = True  # the ticker sends it shortly
+                return
+            self._last_pub = now
+            self._pub_pending = False
+            self.ctl.bus.publish("job", self.snapshot(), retain=True)
+            self._journal()
+
+    def _tick(self, thread: threading.Thread) -> None:
+        """Keep progress current while the job thread is blocked (GRBL's buffer
+        is full during a long move, or GRBL stopped acknowledging): send any
+        throttled update and refresh the executing-line estimate."""
+        while thread.is_alive() and not self._dead:
+            time.sleep(TICK_INTERVAL)
+            if self._pub_pending or self.state in ("running", "starting"):
+                self._publish()
 
     def _set(self, state: str, message: str | None = None) -> None:
         self.state = state
@@ -240,6 +259,10 @@ class JobRunner:
         }
 
     def _journal(self, force: bool = False) -> None:
+        with self._pub_lock:
+            self._journal_locked(force)
+
+    def _journal_locked(self, force: bool) -> None:
         if self.journal is None or not (self.active or self.state == "interrupted"):
             return
         now = time.monotonic()
@@ -379,6 +402,7 @@ class JobRunner:
             self._set("starting")
             self._thread = threading.Thread(target=self._run, args=(v, from_line, entry), name="job", daemon=True)
             self._thread.start()
+            threading.Thread(target=self._tick, args=(self._thread,), name="job-tick", daemon=True).start()
             return self.snapshot()
 
     def pause(self) -> None:
@@ -529,6 +553,10 @@ class JobRunner:
                 if M6_RE.search(cmd):
                     self._tool_change(i, cmd, inflight)
                     continue
+                pm = PAUSE_RE.search(cmd)
+                if pm:
+                    self._program_pause(i, cmd, pm.group(1), inflight)
+                    continue
                 cmd = self._apply_override(cmd)
                 if i > self._reserved:
                     # Journal ahead: after a crash, the last line sent is <= reserved.
@@ -653,14 +681,55 @@ class JobRunner:
                 self._exec = self.acked
                 return
 
-    def _tool_change(self, i: int, cmd: str, inflight: list[tuple[int, Any]]) -> None:
-        # Let everything before the M6 finish.
+    def _drain(self, inflight: list[tuple[int, Any]]) -> None:
+        """Let everything sent so far finish."""
         while inflight:
             self._check_stop()
             self._collect(inflight, wait=0.2)
             if self.held_error is not None:
                 self._wait_continue(inflight)
         self._wait_idle()
+
+    def _wait_for_user(self, info: dict[str, Any], message: str) -> None:
+        """Paused in ``toolchange``: the user may jog, probe and zero, then Continue."""
+        self.toolchange = info
+        self.ctl.busy = None
+        self._continue.clear()
+        self._set("toolchange", message)
+        t_wait = time.time()
+        while not self._continue.wait(0.2):
+            self._check_stop()
+        self._paused_s += time.time() - t_wait
+        self._check_stop()
+        self.ctl.busy = "job"
+        self.toolchange = None
+        self._wait_idle()  # e.g. a jog step the user made is still finishing
+        self._set("running")
+
+    def _program_pause(self, i: int, cmd: str, code: str, inflight: list[tuple[int, Any]]) -> None:
+        """M0 / M1. Sent to GRBL these would feed-hold, where it cannot jog, and
+        the UI would not know why. The server pauses instead, showing the
+        program's (MSG, ...) text: CAM tools often use M0 for a tool change."""
+        v = self.variant
+        pause = next((p for p in (v.pauses if v else []) if p["line"] == i), None)
+        rest = PAUSE_RE.sub("", cmd).strip()
+        self._drain(inflight)
+        if rest:
+            self._send_blocking(rest)
+            self._wait_idle()
+        if code == "0" or self.ctl.settings.get("optionalStop"):
+            note = (pause or {}).get("message")
+            what = "program pause (M0)" if code == "0" else "optional stop (M1)"
+            self._wait_for_user(
+                {"line": i, "tool": None, "kind": f"M{code}", "message": note},
+                f"{what}: {note}" if note else f"{what}: press Continue",
+            )
+        self.sent = self.acked = i
+        self._publish()
+
+    def _tool_change(self, i: int, cmd: str, inflight: list[tuple[int, Any]]) -> None:
+        # Let everything before the M6 finish.
+        self._drain(inflight)
         rest = M6_RE.sub("", cmd)
         tool = None
         m = re.search(r"T(\d+)", rest)
@@ -673,19 +742,10 @@ class JobRunner:
             for c in self._commands_setting("toolChangeCommands"):
                 self._send_blocking(c)
             self._wait_idle()
-            self.toolchange = {"line": i, "tool": tool}
-            self.ctl.busy = None  # the user may jog, probe Z and zero now
-            self._continue.clear()
-            self._set("toolchange", f"change to tool {tool if tool is not None else '?'} and press Continue")
-            t_wait = time.time()
-            while not self._continue.wait(0.2):
-                self._check_stop()
-            self._paused_s += time.time() - t_wait
-            self._check_stop()
-            self.ctl.busy = "job"
-            self.toolchange = None
-            self._wait_idle()  # e.g. a jog step the user made is still finishing
-            self._set("running")
+            self._wait_for_user(
+                {"line": i, "tool": tool, "kind": "M6", "message": None},
+                f"change to tool {tool if tool is not None else '?'} and press Continue",
+            )
         self.sent = self.acked = i
         self._publish()
 

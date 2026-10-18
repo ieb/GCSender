@@ -73,7 +73,7 @@ A quick tour: *5 mm above surface* → *Probe Z* → set a map border → *Probe
 2. Tick **heightmap** to stream the compensated program instead (recomputed at Start if the map has changed).
 3. **Start** runs from line 1, or from the **from line** number (click a table row to pick one). Starting mid-program restores the modal state, raises to safe Z, moves to the start XY, starts the spindle with a dwell, and plunges at no more than the *entry plunge feed*.
 4. Progress in the table and 3D view: grey is done, violet is in GRBL's buffers. The ETA comes from a model of GRBL's planner using your `$110–$122` and `$11`, corrected as the job runs.
-5. **On an M6** the job waits for the machine to stop, runs the *tool-change commands* (default `M5`), and asks. You can jog and probe Z, then **Continue**. **On an error** the machine is feed-held and you choose Continue or Stop. Both are set in *Settings → Application → Jobs*.
+5. **On an M6** the job waits for the machine to stop, runs the *tool-change commands* (default `M5`), and asks. You can jog and probe Z, then **Continue**. **On an M0** (program pause; many CAM tools write a tool change as `(MSG, Change tool…)` + `M0`) the job pauses the same way and shows the message. **M1** (optional stop) does too, unless turned off. **On an error** the machine is feed-held and you choose Continue or Stop. Both are set in *Settings → Application → Jobs*.
 
 The simulator moves at constant speed (no acceleration), so its run times are shorter than the estimate. The ETA on the real machine is a deferred hardware check.
 
