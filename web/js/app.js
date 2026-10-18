@@ -21,9 +21,11 @@ import { initLayout } from "./ui/layout.js";
 import { initProfiles } from "./ui/profiles.js";
 import { initHelp } from "./ui/help.js";
 import { initBugReport } from "./ui/bugreport.js";
+import { ensureSession } from "./ui/login.js";
 
 initDisplayEditor(); // first: theme, touch size and layout lock
 initLayout();
+await ensureSession(); // LAN: log in before anything calls the API
 const store = createStore();
 const log = initConsole(store);
 initConnection(store, log);

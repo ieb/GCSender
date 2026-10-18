@@ -30,6 +30,8 @@
       <button id="open-bugreport" type="button" title="Report a problem: saves a bug report on the server with what you describe plus the machine, job, log and browser state, so it can be diagnosed later. Past reports can be downloaded here.">🐞 Report</button>
       <button id="open-help" type="button" title="Help: how to use GCSender, safety notes and troubleshooting">Help</button>
     </div>
+    <span id="session-user" class="muted small" hidden title="Logged in as this user (the session is an HttpOnly cookie)"></span>
+    <button id="logout" type="button" hidden title="Log out: ends this session on the server">Log out</button>
     <div class="link" id="link" title="Server link"><span class="dot"></span><span id="link-text">offline</span></div>
   </header>
 
@@ -505,6 +507,22 @@
         <button title="Check and save all user commands" type="button" id="macro-save" class="primary">Save</button>
       </div>
     </section>
+  </dialog>
+
+  <dialog id="dlg-login" class="dialog login">
+    <form id="login-form" class="tab-body" autocomplete="on">
+      <h2>GCSender</h2>
+      <p id="login-note" class="muted small">Log in to use GCSender on this computer.</p>
+      <p id="login-no-users" class="error small" hidden>No user accounts exist on the server yet. On the computer running GCSender, run <code>gcsender --add-user NAME</code>, then reload this page.</p>
+      <label for="login-user">User name</label>
+      <input id="login-user" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required>
+      <label for="login-pass">Password</label>
+      <input id="login-pass" name="password" type="password" autocomplete="current-password" required>
+      <p id="login-error" class="error small" hidden></p>
+      <div class="dialog-foot">
+        <button type="submit" id="login-submit" class="primary" title="Log in to this GCSender server">Log in</button>
+      </div>
+    </form>
   </dialog>
 
   <dialog id="dlg-bugreport" class="dialog">

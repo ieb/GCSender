@@ -1,21 +1,22 @@
-// HTTP API client. The token comes from the page (injected by the server for
-// loopback clients) or from a ?t= URL parameter (LAN clients); it is kept in
-// sessionStorage and removed from the visible URL.
-
-const TOKEN_KEY = "gcs-token";
+// HTTP API client.
+//
+// On the computer running the server, the page is served with the API token
+// embedded (loopback only) and sends it in a header. From another computer
+// there is no token: the user logs in and the server sets an HttpOnly session
+// cookie, which the browser sends by itself; the page never sees a key.
+// Every request carries X-GCS-Request: 1, which the server requires for
+// cookie-authenticated changes (a cross-site page cannot send it).
 
 function resolveToken() {
   const meta = document.querySelector('meta[name="gcs-token"]');
-  let token = meta && meta.content ? meta.content : null;
   const url = new URL(window.location.href);
-  const fromUrl = url.searchParams.get("t");
-  if (fromUrl) {
-    token = fromUrl;
+  if (url.searchParams.has("t")) {
+    // Old-style LAN links carried the token in the URL; never keep it there.
     url.searchParams.delete("t");
     history.replaceState(null, "", url.pathname + url.search + url.hash);
   }
-  if (token) sessionStorage.setItem(TOKEN_KEY, token);
-  return token || sessionStorage.getItem(TOKEN_KEY);
+  sessionStorage.removeItem("gcs-token"); // no longer stored by the page
+  return meta && meta.content ? meta.content : null;
 }
 
 export const token = resolveToken();
@@ -28,7 +29,8 @@ export class ApiError extends Error {
 }
 
 export async function request(method, path, body, { raw = false } = {}) {
-  const headers = { "X-GCS-Token": token || "" };
+  const headers = { "X-GCS-Request": "1" };
+  if (token) headers["X-GCS-Token"] = token;
   const init = { method, headers, cache: "no-store" };
   if (body !== undefined && raw) {
     headers["Content-Type"] = "text/plain";
@@ -54,6 +56,9 @@ export async function request(method, path, body, { raw = false } = {}) {
   }
   if (!res.ok) {
     const msg = (payload && payload.error) || res.statusText;
+    if (res.status === 401 && !token && path !== "/api/login") {
+      window.dispatchEvent(new CustomEvent("gcs-login-required"));
+    }
     note(res.status, String(msg).slice(0, 500));
     throw new ApiError(res.status, msg);
   }
@@ -140,22 +145,34 @@ export const bugReports = {
   archiveUrl: () => downloadUrl("/api/bugreports/archive"),
 };
 
+// Links and EventSource cannot send headers: with a token (local page) it goes
+// in the query; with a login session the cookie is sent automatically.
+function withAuth(path, params = {}) {
+  const p = new URLSearchParams(params);
+  if (token) p.set("t", token);
+  const q = p.toString();
+  return q ? `${path}?${q}` : path;
+}
+
 export function downloadUrl(path) {
-  return path + "?" + new URLSearchParams({ t: token || "" }).toString();
+  return withAuth(path);
 }
 
 export function heightmapExportUrl() {
-  return "/api/heightmap/export?" + new URLSearchParams({ t: token || "" }).toString();
+  return withAuth("/api/heightmap/export");
 }
 
 export function transcriptUrl(date) {
-  const p = new URLSearchParams({ t: token || "", date });
-  return "/api/logs/serial?" + p.toString();
+  return withAuth("/api/logs/serial", { date });
 }
 
 export function eventsUrl(lastId) {
-  const p = new URLSearchParams({ t: token || "" });
-  if (lastId) p.set("last", lastId);
-  return "/api/events?" + p.toString();
+  return withAuth("/api/events", lastId ? { last: lastId } : {});
 }
+
+export const session = {
+  info: () => request("GET", "/api/session"),
+  login: (username, password) => request("POST", "/api/login", { username, password }),
+  logout: () => request("POST", "/api/logout", {}),
+};
 

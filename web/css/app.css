@@ -457,3 +457,11 @@ input.narrow { width: 56px; }
 #bug-list td:last-child { white-space: nowrap; text-align: right; }
 #bug-list .bug-title { max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #bug-remote code { user-select: all; word-break: break-all; }
+
+/* login */
+.dialog.login { width: min(360px, 94vw); }
+.dialog.login h2 { margin: 0 0 4px; }
+.dialog.login form { gap: 6px; }
+.dialog.login input { font-size: 15px; padding: 6px 8px; }
+.dialog.login .error, .error.small { color: var(--danger); }
+#session-user { margin-left: 8px; }

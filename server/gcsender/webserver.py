@@ -3,10 +3,16 @@
 Security model (docs/PLAN.md §6.1) - this server can move a machine:
 
 * Binds to 127.0.0.1 by default; ``--lan`` is an explicit opt-in.
-* A random per-run token is required for every ``/api`` request
-  (header ``X-GCS-Token``; GET requests may use ``?t=`` because
-  ``EventSource`` cannot set headers). The SPA receives it injected into
-  ``index.html`` - but only when the page is requested from loopback.
+* Every ``/api`` request needs one of:
+  - the API token (random per run or ``--token``) in ``X-GCS-Token``; as
+    ``?t=`` (downloads, ``EventSource``) only from loopback. The SPA
+    receives it injected into ``index.html`` - only when served to loopback;
+  - a login session (LAN): ``POST /api/login`` sets an HttpOnly,
+    SameSite=Strict cookie, so the page never holds a key. Mutating
+    requests with a session must also send ``X-GCS-Request: 1`` (a custom
+    header cannot be sent cross-site without a CORS pre-flight, which is
+    never answered);
+  - the read-only reports token, for ``GET /api/bugreports...`` only.
 * ``Host`` must name this server (DNS-rebinding defence); ``Origin``, when
   present, must equal our own origin; mutating requests must be JSON (this
   also forces a CORS pre-flight for cross-site forms, which we never answer).
@@ -26,11 +32,13 @@ import socket
 import sys
 import threading
 from http import HTTPStatus
+from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import parse_qs, urlsplit
 
+from .auth import Auth
 from .events import EventBus
 
 log = logging.getLogger(__name__)
@@ -132,6 +140,7 @@ class AppServer(ThreadingHTTPServer):
         lan: bool = False,
         allowed_hosts: tuple[str, ...] = (),
         reports_token: str | None = None,
+        auth: Auth | None = None,
     ):
         self.bus = bus
         self.router = router
@@ -139,6 +148,7 @@ class AppServer(ThreadingHTTPServer):
         self.token = token or secrets.token_urlsafe(24)
         # Read-only token for downloading bug reports (GET /api/bugreports*) only.
         self.reports_token = reports_token
+        self.auth = auth
         self.lan = lan
         self.extra_hosts = {h.lower() for h in allowed_hosts}
         self.shutting_down = threading.Event()
@@ -211,8 +221,8 @@ class Handler(BaseHTTPRequestHandler):
         if self.command != "HEAD":
             self.wfile.write(body)
 
-    def _json(self, status: int, payload: Any) -> None:
-        self._send(status, json.dumps(payload).encode(), "application/json")
+    def _json(self, status: int, payload: Any, extra: dict[str, str] | None = None) -> None:
+        self._send(status, json.dumps(payload).encode(), "application/json", extra)
 
     def _error(self, status: int, message: str) -> None:
         self._json(status, {"error": message})
@@ -273,25 +283,117 @@ class Handler(BaseHTTPRequestHandler):
             except OSError:
                 pass
 
-    def _check_token(self, query: dict[str, list[str]], path: str = "") -> None:
+    # -- authentication -------------------------------------------------------
+
+    @property
+    def _cookie_name(self) -> str:
+        return f"gcs_session_{self.server.port}"  # cookies are not per-port; keep servers apart
+
+    def _session_id(self) -> str | None:
+        raw = self.headers.get("Cookie")
+        if not raw:
+            return None
+        try:
+            c = SimpleCookie()
+            c.load(raw)
+        except CookieError:
+            return None
+        m = c.get(self._cookie_name)
+        return m.value if m else None
+
+    def _principal(self, query: dict[str, list[str]], path: str) -> dict[str, Any] | None:
+        """Who is calling, or None. Raises for a session missing the CSRF header."""
+        safe = self.command in ("GET", "HEAD")
         supplied = self.headers.get("X-GCS-Token")
-        if supplied is None and self.command in ("GET", "HEAD"):
+        from_query = False
+        if supplied is None and safe:
             supplied = (query.get("t") or [None])[0]
-        if not supplied:
-            raise ApiError(401, "missing or invalid token")
-        if hmac.compare_digest(supplied.encode(), self.server.token.encode()):
+            from_query = supplied is not None
+        if supplied:
+            if hmac.compare_digest(supplied.encode(), self.server.token.encode()):
+                if from_query and not self._client_is_loopback():
+                    return None  # keep the full token out of LAN URLs (logs, history); log in instead
+                return {"via": "token"}
+            reports = self.server.reports_token
+            if (
+                reports
+                and safe
+                and (path == "/api/bugreports" or path.startswith("/api/bugreports/"))
+                and hmac.compare_digest(supplied.encode(), reports.encode())
+            ):
+                return {"via": "reports-token"}  # the reports token can only read bug reports
+            return None
+        auth = self.server.auth
+        if auth is not None:
+            user = auth.sessions.lookup(self._session_id())
+            if user is not None:
+                if not safe and self.headers.get("X-GCS-Request") != "1":
+                    raise ApiError(403, "missing X-GCS-Request header")
+                return {"via": "session", "user": user}
+        return None
+
+    def _check_token(self, query: dict[str, list[str]], path: str = "") -> dict[str, Any]:
+        who = self._principal(query, path)
+        if who is None:
+            raise ApiError(401, "login required" if self.server.auth is not None else "missing or invalid token")
+        return who
+
+    def _client(self) -> str:
+        return self.client_address[0]
+
+    def _login(self, path: str, query: dict[str, list[str]]) -> None:
+        auth = self.server.auth
+        req = Request(self, path, query, {})
+        body = req.json(limit=8192)
+        if auth is None or not auth.users.names():
+            raise ApiError(403, "no user accounts: create one on the server with gcsender --add-user NAME")
+        wait = auth.limiter.retry_after(self._client())
+        if wait > 0:
+            self._json(429, {"error": f"too many failed logins: try again in {int(wait) + 1} s"},
+                       {"Retry-After": str(int(wait) + 1)})
             return
-        reports = self.server.reports_token
-        if (
-            reports
-            and self.command in ("GET", "HEAD")
-            and (path == "/api/bugreports" or path.startswith("/api/bugreports/"))
-            and hmac.compare_digest(supplied.encode(), reports.encode())
-        ):
-            return  # the reports token can only read bug reports
-        raise ApiError(401, "missing or invalid token")
+        name, password = body.get("username"), body.get("password")
+        if not isinstance(name, str) or not auth.users.verify(name, password):
+            auth.limiter.failed(self._client())
+            log.warning("failed login for %r from %s", str(name)[:40], self._client())
+            raise ApiError(401, "wrong user name or password")
+        auth.limiter.succeeded(self._client())
+        sid = auth.sessions.create(name, self._client(), self.headers.get("User-Agent"))
+        log.info("%s logged in from %s", name, self._client())
+        cookie = (
+            f"{self._cookie_name}={sid}; HttpOnly; SameSite=Strict; Path=/; Max-Age={int(auth.sessions.absolute_s)}"
+        )
+        self._json(200, {"user": name, "via": "session"}, {"Set-Cookie": cookie})
+
+    def _logout(self, path: str, query: dict[str, list[str]]) -> None:
+        Request(self, path, query, {}).body()
+        if self.server.auth is not None:
+            self.server.auth.sessions.revoke(self._session_id())
+        self._json(200, {"ok": True}, {"Set-Cookie": f"{self._cookie_name}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0"})
+
+    def _session_info(self, query: dict[str, list[str]], path: str) -> None:
+        try:
+            who = self._principal(query, path)
+        except ApiError:
+            who = None
+        auth = self.server.auth
+        self._json(200, {
+            "authenticated": who is not None and who["via"] != "reports-token",
+            "via": who["via"] if who else None,
+            "user": who.get("user") if who else None,
+            "loginAvailable": bool(auth and auth.users.names()),
+        })
 
     def _api(self, path: str, query: dict[str, list[str]]) -> None:
+        if path == "/api/login" and self.command == "POST":
+            self._login(path, query)
+            return
+        if path == "/api/logout" and self.command == "POST":
+            self._logout(path, query)
+            return
+        if path == "/api/session" and self.command == "GET":
+            self._session_info(query, path)
+            return
         self._check_token(query, path)
         if path == "/api/events" and self.command == "GET":
             self._sse(query)

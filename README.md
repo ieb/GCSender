@@ -43,6 +43,23 @@ uv run gcsender --port /dev/tty.usbserial-XXXX     # or pick the port in the UI
 ```
 Then open the printed URL (default <http://127.0.0.1:8080/>).
 
+### Using it from another computer (LAN)
+Create a user once, then start the server with `--lan`; other computers open `http://<host>:8080/` and log in:
+
+```sh
+uv run gcsender --add-user ian        # asks for a password (8+ characters); run again to change it
+uv run gcsender --lan --port /dev/tty.usbserial-XXXX
+```
+
+| Option | Meaning |
+|---|---|
+| `--add-user NAME` | Create a user or set a new password (ends that user's sessions). With `--password-stdin` the password is read from stdin |
+| `--remove-user NAME` | Delete a user; their sessions end at once |
+| `--list-users` | Users and how many sessions each has |
+
+These change `<state-dir>/users.json` and take effect on a running server. A login lasts until **Log out**, 7 days
+without use, or 30 days. The browser on the server's own computer needs no login.
+
 ### Options
 | Option | Meaning |
 |---|---|
@@ -117,10 +134,14 @@ curl -o r.zip -H "X-GCS-Token: <reports-token>" http://<host>:8080/api/bugreport
 ## Security
 The server can move a machine, so:
 - It listens on localhost only unless `--lan` is given.
-- Every API call needs a token: random per run, or fixed with `--token` / `--token-file` / `GCSENDER_TOKEN`. The page
-  served to localhost gets it automatically; LAN devices use the printed `?t=` URL. Anyone with the token can move the
-  machine: with `--lan`, prefer a long random value (e.g. `python3 -c "import secrets; print(secrets.token_urlsafe(24))"`)
-  kept in a file readable only by you (`chmod 600`).
+- **Other computers log in** with a user name and password (scrypt-hashed in `users.json`). The server then sets an
+  HttpOnly, SameSite=Strict session cookie: the page never holds a key, and scripts in it cannot read the cookie.
+  Changes made with a session must carry the `X-GCS-Request: 1` header, which another website cannot send.
+  Failed logins from one address are slowed down after 5 attempts.
+- **The API token** (random per run, or fixed with `--token` / `--token-file` / `GCSENDER_TOKEN`) is for the page on
+  the server's own computer (embedded automatically) and for scripts, in the `X-GCS-Token` header. From another
+  computer it is accepted only in that header, never in a `?t=` URL, and it is no longer printed. Anyone with it can
+  move the machine: if you fix it, use a long random value kept in a file readable only by you (`chmod 600`).
 - Requests with a foreign `Host` or `Origin`, and non-JSON form posts, are rejected.
 - The bug-reports token (see *Reporting a problem*) only allows `GET /api/bugreports…`.
 

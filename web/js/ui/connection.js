@@ -1,6 +1,6 @@
 // Connection bar: port/baud selection, connect/disconnect, server link state.
 
-import { api } from "../api.js";
+import { api, token } from "../api.js";
 import { $, showBanner } from "./dom.js";
 
 const LAST_PORT = "gcs-last-port";
@@ -90,8 +90,8 @@ export function initConnection(store, log) {
   function renderLink() {
     const l = store.state.link;
     link.className = "link " + (l === "live" ? "live" : l === "connecting" ? "connecting" : "");
-    linkText.textContent = { live: "server live", connecting: "reconnecting…", offline: "server offline", unauthorized: "token rejected" }[l] || l;
-    if (l === "unauthorized") showBanner("The server was restarted with a new access token — reload this page.", "error");
+    linkText.textContent = { live: "server live", connecting: "reconnecting…", offline: "server offline", unauthorized: "not authorised" }[l] || l;
+    if (l === "unauthorized" && token) showBanner("The server was restarted with a new access token — reload this page.", "error");
     else if (l === "offline") showBanner("Lost contact with the gcsender server. Retrying…", "error");
     else if (l === "live") showBanner(null);
   }

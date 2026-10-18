@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import logging
 import os
 import re
@@ -26,6 +27,7 @@ from .jobs.journal import Journal
 from .jobs.library import JobLibrary
 from .macros import MacroRunner, MacroStore
 from .jobs.runner import JobRunner
+from .auth import Auth, AuthError
 from .bugreport import BugReports
 from .probe import Prober
 from .profiles import ProfileStore
@@ -67,9 +69,49 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         f"also read from ${TOKEN_ENV}",
     )
     p.add_argument("--token-file", type=Path, help="read the API access token from this file (keeps it out of ps and shell history)")
+    users = p.add_argument_group("user accounts (LAN login); these change the state directory and exit")
+    users.add_argument("--add-user", metavar="NAME", help="create a user, or set a new password (asks for it; ends their sessions)")
+    users.add_argument("--password-stdin", action="store_true", help="with --add-user: read the password from stdin")
+    users.add_argument("--remove-user", metavar="NAME", help="delete a user (their sessions end at once)")
+    users.add_argument("--list-users", action="store_true", help="list users and active sessions")
     p.add_argument("-v", "--verbose", action="store_true")
     p.add_argument("--version", action="version", version=f"gcsender {__version__}")
     return p.parse_args(argv)
+
+
+def manage_users(args: argparse.Namespace) -> int | None:
+    """--add-user / --remove-user / --list-users: change users.json and exit."""
+    if not (args.add_user or args.remove_user or args.list_users):
+        return None
+    state_dir = args.state_dir.expanduser()
+    auth = Auth(state_dir)
+    try:
+        if args.add_user:
+            if args.password_stdin:
+                password = sys.stdin.readline().rstrip("\r\n")
+            else:
+                password = getpass.getpass(f"password for {args.add_user}: ")
+                if getpass.getpass("again: ") != password:
+                    print("error: the passwords differ", file=sys.stderr)
+                    return 1
+            created = auth.users.set_password(args.add_user, password)
+            print(f"{'created' if created else 'changed the password of'} {args.add_user} in {state_dir / 'users.json'}")
+        if args.remove_user:
+            if not auth.users.remove(args.remove_user):
+                print(f"error: no user {args.remove_user!r}", file=sys.stderr)
+                return 1
+            print(f"removed {args.remove_user}")
+        if args.list_users:
+            sessions = auth.sessions.active()
+            for name in auth.users.names():
+                mine = [x for x in sessions if x["user"] == name]
+                print(f"{name}  ({len(mine)} active session{'s' if len(mine) != 1 else ''})")
+            if not auth.users.names():
+                print("no users")
+    except AuthError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    return 0
 
 
 def setup_log_file(state_dir: Path) -> Path | None:
@@ -132,6 +174,9 @@ def load_reports_token(state_dir: Path) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    managed = manage_users(args)
+    if managed is not None:
+        return managed
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(line_buffering=True)  # start-up URLs reach logs and service managers at once
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -168,6 +213,7 @@ def main(argv: list[str] | None = None) -> int:
     state_dir: Path = args.state_dir.expanduser()
     log_file = setup_log_file(state_dir)
     reports_token = load_reports_token(state_dir)
+    auth = Auth(state_dir)
     try:
         api_token, token_source = resolve_token(args)
     except ValueError as e:
@@ -229,6 +275,7 @@ def main(argv: list[str] | None = None) -> int:
             lan=lan,
             allowed_hosts=tuple(args.allow_host),
             reports_token=reports_token,
+            auth=auth,
         )
     except OSError as e:
         print(f"cannot listen on {host}:{http_port}: {e}", file=sys.stderr)
@@ -242,8 +289,12 @@ def main(argv: list[str] | None = None) -> int:
     shown_host = "127.0.0.1" if host in ("0.0.0.0", "::") else host
     print(f"gcsender {__version__} listening on http://{shown_host}:{server.port}/")
     if lan:
-        print("WARNING: LAN access enabled - anyone with the token can move the machine.")
-        print(f"         remote URL: http://<this-host>:{server.port}/?t={server.token}")
+        names = auth.users.names()
+        if names:
+            print(f"LAN access: open http://<this-host>:{server.port}/ and log in ({len(names)} user{'s' if len(names) > 1 else ''}).")
+        else:
+            print("WARNING: LAN access is enabled but there are no user accounts, so other computers cannot log in.")
+            print("         Create one with:  gcsender --add-user NAME")
     if sim:
         print(f"simulated GRBL {args.simulate} available as port '{SIM_PORT}'")
 

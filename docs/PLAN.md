@@ -341,10 +341,11 @@ web/                    served as the SPA
 
 ### 6.1 Security (it moves a machine)
 - **Binding:** `127.0.0.1` by default. `--lan` binds `0.0.0.0` and prints a warning.
+- **LAN login (`auth.py`):** users in `<state>/users.json` (scrypt n=2^14, r=8, p=1; managed with `--add-user` / `--remove-user` / `--list-users`, reloaded when the file changes). `POST /api/login {username, password}` sets `gcs_session_<port>` (cookies are not per-port), HttpOnly, SameSite=Strict, Path=/; only its SHA-256 is stored (`sessions.json`, survives restarts). Sessions end on logout, after 7 days idle, 30 days after login, when the user is removed or their password changes. Mutating requests on a session need `X-GCS-Request: 1` (CSRF: a custom header forces a CORS pre-flight that is never answered). Failed logins: 5 free per address, then 2 s doubling up to 15 min. `GET /api/session` tells the SPA whether to show the login; a 401 later re-opens it. The SPA never receives a key: `index.html` carries the token only for loopback clients, and `?t=` in a URL is stripped and ignored.
 - **Token:**
   - A random token is created at each start-up unless one is given with `--token`, `--token-file` or `$GCSENDER_TOKEN` (in that order; 16–256 URL-safe characters, validated because it is placed in URLs and the HTML; must differ from the reports token). It is injected into the served `index.html` (`<meta name="gcs-token">`) and printed on the console for LAN devices.
   - Every non-GET request requires the header `X-GCS-Token`.
-  - The SSE stream and data GETs take the token as `?t=`.
+  - The SSE stream and data GETs take the token as `?t=`, from loopback clients only (LAN pages use the session cookie; scripts use the header).
 - **Request checks:**
   - Mutating calls require `Content-Type: application/json` (or `text/plain` with the token header for uploads).
   - `Origin`, when present, must match the server's own origin.
