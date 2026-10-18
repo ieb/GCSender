@@ -342,7 +342,7 @@ web/                    served as the SPA
 ### 6.1 Security (it moves a machine)
 - **Binding:** `127.0.0.1` by default. `--lan` binds `0.0.0.0` and prints a warning.
 - **Token:**
-  - A random token is created at each start-up. It is injected into the served `index.html` (`<meta name="gcs-token">`) and printed on the console for LAN devices.
+  - A random token is created at each start-up unless one is given with `--token`, `--token-file` or `$GCSENDER_TOKEN` (in that order; 16–256 URL-safe characters, validated because it is placed in URLs and the HTML; must differ from the reports token). It is injected into the served `index.html` (`<meta name="gcs-token">`) and printed on the console for LAN devices.
   - Every non-GET request requires the header `X-GCS-Token`.
   - The SSE stream and data GETs take the token as `?t=`.
 - **Request checks:**

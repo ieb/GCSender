@@ -50,6 +50,8 @@ Then open the printed URL (default <http://127.0.0.1:8080/>).
 | `--baud N` | Baud rate (default 115200) |
 | `--http HOST:PORT` | Listen address (default `127.0.0.1:8080`) |
 | `--lan` | Allow other devices on the network. Prints a URL containing the access token |
+| `--token TOKEN` | Use this API token instead of a random one at each start, so bookmarks and scripts keep working. 16–256 of `A-Z a-z 0-9 - _ . ~` |
+| `--token-file FILE` | Read the token from a file (keeps it out of `ps` and shell history). The `GCSENDER_TOKEN` environment variable also works; precedence: `--token`, `--token-file`, `GCSENDER_TOKEN`, random |
 | `--allow-host NAME` | Extra `Host` name to accept (e.g. a DNS name for the machine) |
 | `--simulate 0.9j\|1.1f` | Provide a simulated controller as port `sim` |
 | `--sim-no-reset`, `--sim-speed X` | Simulator: no reset when the port opens / time scale |
@@ -115,8 +117,10 @@ curl -o r.zip -H "X-GCS-Token: <reports-token>" http://<host>:8080/api/bugreport
 ## Security
 The server can move a machine, so:
 - It listens on localhost only unless `--lan` is given.
-- Every API call needs a random per-run token. The page served to localhost gets it automatically; LAN devices use
-  the printed `?t=` URL.
+- Every API call needs a token: random per run, or fixed with `--token` / `--token-file` / `GCSENDER_TOKEN`. The page
+  served to localhost gets it automatically; LAN devices use the printed `?t=` URL. Anyone with the token can move the
+  machine: with `--lan`, prefer a long random value (e.g. `python3 -c "import secrets; print(secrets.token_urlsafe(24))"`)
+  kept in a file readable only by you (`chmod 600`).
 - Requests with a foreign `Host` or `Origin`, and non-JSON form posts, are rejected.
 - The bug-reports token (see *Reporting a problem*) only allows `GET /api/bugreports…`.
 

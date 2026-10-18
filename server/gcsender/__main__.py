@@ -5,12 +5,14 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import re
 import secrets
 import socket
 import sys
 import time
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from collections.abc import Mapping
 from typing import Any
 
 from . import __version__
@@ -59,7 +61,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--state-dir", type=Path, default=DEFAULT_STATE_DIR,
                    help=f"settings, logs and (later) jobs/heightmaps (default {DEFAULT_STATE_DIR})")
     p.add_argument("--web-root", type=Path, default=DEFAULT_WEB_ROOT, help=argparse.SUPPRESS)
-    p.add_argument("--token", help=argparse.SUPPRESS)  # fixed token for development/testing
+    p.add_argument(
+        "--token",
+        help="API access token instead of a random one per start (at least 16 of A-Z a-z 0-9 - _ . ~); "
+        f"also read from ${TOKEN_ENV}",
+    )
+    p.add_argument("--token-file", type=Path, help="read the API access token from this file (keeps it out of ps and shell history)")
     p.add_argument("-v", "--verbose", action="store_true")
     p.add_argument("--version", action="version", version=f"gcsender {__version__}")
     return p.parse_args(argv)
@@ -78,6 +85,30 @@ def setup_log_file(state_dir: Path) -> Path | None:
     except OSError as e:
         print(f"cannot write the log file: {e}", file=sys.stderr)
         return None
+
+
+TOKEN_ENV = "GCSENDER_TOKEN"
+TOKEN_RE = re.compile(r"^[A-Za-z0-9._~-]{16,256}$")
+
+
+def resolve_token(args: argparse.Namespace, environ: Mapping[str, str] = os.environ) -> tuple[str | None, str]:
+    """The API token and where it came from: --token, --token-file, $GCSENDER_TOKEN or random."""
+    if args.token is not None and args.token_file is not None:
+        raise ValueError("use either --token or --token-file, not both")
+    if args.token is not None:
+        token, source = args.token.strip(), "--token"
+    elif args.token_file is not None:
+        try:
+            token, source = args.token_file.expanduser().read_text(encoding="utf-8").strip(), "--token-file"
+        except OSError as e:
+            raise ValueError(f"cannot read the token file: {e}") from None
+    elif environ.get(TOKEN_ENV):
+        token, source = environ[TOKEN_ENV].strip(), f"${TOKEN_ENV}"
+    else:
+        return None, "random"
+    if not TOKEN_RE.match(token):
+        raise ValueError(f"the token from {source} must be 16-256 characters of A-Z a-z 0-9 - _ . ~")
+    return token, source
 
 
 def load_reports_token(state_dir: Path) -> str:
@@ -101,6 +132,8 @@ def load_reports_token(state_dir: Path) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(line_buffering=True)  # start-up URLs reach logs and service managers at once
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     log_ring = LogRing()
     logging.getLogger().addHandler(log_ring)
@@ -135,6 +168,14 @@ def main(argv: list[str] | None = None) -> int:
     state_dir: Path = args.state_dir.expanduser()
     log_file = setup_log_file(state_dir)
     reports_token = load_reports_token(state_dir)
+    try:
+        api_token, token_source = resolve_token(args)
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    if api_token is not None and api_token == reports_token:
+        print("error: the API token must differ from the read-only reports token", file=sys.stderr)
+        return 2
     settings = SettingsStore(state_dir / "settings.json")
     transcript = Transcript(state_dir / "logs")
     bus = EventBus()
@@ -184,7 +225,7 @@ def main(argv: list[str] | None = None) -> int:
             bus=bus,
             router=router,
             web_root=args.web_root,
-            token=args.token,
+            token=api_token,
             lan=lan,
             allowed_hosts=tuple(args.allow_host),
             reports_token=reports_token,
@@ -206,6 +247,7 @@ def main(argv: list[str] | None = None) -> int:
     if sim:
         print(f"simulated GRBL {args.simulate} available as port '{SIM_PORT}'")
 
+    print(f"API token: {'fixed, from ' + token_source if api_token else 'random for this run'}")
     print(f"state directory: {state_dir}")
     if lan:
         print(f"bug reports (read-only token): http://<this-host>:{server.port}/api/bugreports/archive?t={reports_token}")
