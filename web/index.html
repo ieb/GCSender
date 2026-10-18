@@ -295,10 +295,11 @@
       </div>
       <section class="panel bottom-panel" id="panel-program" data-bottom-body="program">
         <div class="job-bar">
-          <label class="button-like" title="Upload a G-code file to the server (it is kept in the job library)">Open…<input type="file" id="job-file" accept=".nc,.gcode,.ngc,.tap,.cnc,.txt,.gc,.g" hidden></label>
-          <select id="job-library" title="Job library on the server"><option value="">Library…</option></select>
+          <label class="button-like" title="Upload a G-code file, or a .zip of a board's programs (kept together as a set), to the server's library">Open…<input type="file" id="job-file" accept=".nc,.gcode,.ngc,.tap,.cnc,.txt,.gc,.g,.zip" hidden></label>
+          <button type="button" id="job-library" title="Library: sets (zips of a board's programs) and single programs on the server; load, reorder, rename or delete">Library…</button>
           <button type="button" id="job-unload" title="Unload the program (it stays in the library)">✕</button>
           <span id="job-name" class="job-name mono"></span>
+          <button type="button" id="job-next" class="primary" hidden title="Load the next program of this set">Next</button>
           <label title="Stream the heightmap-compensated program (computed on the server)"><input type="checkbox" id="job-heightmap"> heightmap</label>
         </div>
         <div class="job-bar">
@@ -509,6 +510,35 @@
     </section>
   </dialog>
 
+  <dialog id="dlg-library" class="dialog library">
+    <form method="dialog" class="dialog-head">
+      <strong>Program library</strong>
+      <button class="close" value="close" title="Close">✕</button>
+    </form>
+    <section class="tab-body">
+      <div class="lib-bar">
+        <label class="button-like" title="Upload a G-code file, or a .zip of a board's programs: every G-code file in the zip is kept together as a set">Upload…<input type="file" id="lib-upload" accept=".nc,.gcode,.ngc,.tap,.cnc,.txt,.gc,.g,.zip" hidden></label>
+        <span class="muted small">A <b>.zip</b> becomes a set: its G-code files keep their names, ordered back → align → front → drill → cut-out (reorder with ↑ ↓). Other files (Gerber, Excellon, notes) are skipped.</span>
+      </div>
+      <div class="lib-cols">
+        <div id="lib-sets" class="lib-sets"></div>
+        <div class="lib-main">
+          <div class="lib-bar">
+            <strong id="lib-set-title"></strong>
+            <span class="spacer"></span>
+            <button type="button" id="lib-rename" title="Rename this set" hidden>Rename</button>
+            <button type="button" id="lib-delete-set" class="danger" title="Delete this set and all its programs from the server" hidden>Delete set</button>
+          </div>
+          <div class="table-wrap">
+            <table class="settings-table small lib-table"><thead><tr><th>#</th><th>Program</th><th>Lines</th><th>Last run</th><th></th></tr></thead>
+              <tbody id="lib-files"></tbody></table>
+          </div>
+        </div>
+      </div>
+      <p id="lib-status" class="muted small"></p>
+    </section>
+  </dialog>
+
   <dialog id="dlg-login" class="dialog login">
     <form id="login-form" class="tab-body" autocomplete="on">
       <h2>GCSender</h2>
@@ -573,7 +603,7 @@
       <p><b>Probe Z</b> touches off on a plate (thickness in the panel), optionally twice (fast, then slow), and sets work Z. <b>Test</b> checks the probe input first: the probe must read open, then touching when you close the clip on the plate.</p>
       <p>For PCB work set a <b>heightmap</b> border (or <b>Auto</b> from a G-code file) and grid, then <b>Probe map</b>. The first point is the reference (Z0); every other point is relative to it. With a map loaded, tick <b>heightmap</b> in the Program panel to stream the compensated program; the server computes it. Maps can be saved, loaded and exchanged with Candle (<code>.map</code>).</p>
       <h3 id="h-job">Jobs</h3>
-      <p><b>Open…</b> (or drop a file) uploads a program to the server's library. <b>Start</b> runs it; <b>Pause</b> is a feed hold; <b>Stop</b> holds, resets and restores the offsets. To restart part-way, click a line in the table (or type it in <i>from line</i>): the server restores the program state at that line, raises to safe Z, moves above the start, starts the spindle with a dwell and plunges slowly. In the table and the 3D view, grey is done and violet is in GRBL's buffers.</p>
+      <p><b>Open…</b> (or drop a file) uploads a program to the server's library. A <b>.zip</b> of a board's programs becomes a <i>set</i>: pick it in <b>Library…</b>, check the order (back, align, front, drill, cut-out by default), load the first, and use <b>Next</b> after each one. <b>Start</b> runs it; <b>Pause</b> is a feed hold; <b>Stop</b> holds, resets and restores the offsets. To restart part-way, click a line in the table (or type it in <i>from line</i>): the server restores the program state at that line, raises to safe Z, moves above the start, starts the spindle with a dwell and plunges slowly. In the table and the 3D view, grey is done and violet is in GRBL's buffers.</p>
       <p>On an <b>M6</b>, or an <b>M0</b>/<b>M1</b> program pause (CAM tools often write a tool change as <code>(MSG, …)</code> + <code>M0</code>; its message is shown), the job stops and asks. Jogging and probing are allowed, then press <b>Continue</b>. On an <b>error</b> the machine is held and you choose Continue or Stop. The feed slider is an override: on GRBL 0.9 it takes effect after the moves already buffered (up to about 17).</p>
       <h3 id="h-recover">Recovery</h3>
       <p>If the server stops or the USB link drops mid-job, the job comes back as <b>interrupted</b>. If the board was <i>not</i> reset, GCSender finds where it stopped and offers <b>Resume here</b>. If it was reset, the position is lost: re-establish work zero (and Z, at the heightmap origin if you use one), tick the two boxes and <b>Resume with safe entry</b>. Check the suggested line before resuming.</p>

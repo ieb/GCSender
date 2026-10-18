@@ -227,8 +227,22 @@ class JobRunner:
     def _set(self, state: str, message: str | None = None) -> None:
         self.state = state
         self.message = message
+        if state in FINAL:
+            # Free the controller before anyone can see "done": a jog sent the
+            # moment the UI shows it must not be refused as busy.
+            self.ctl.busy = None
         if state in FINAL and self.journal is not None:
             self.journal.clear()
+        if state in FINAL and self.meta and self.started_at:
+            result = {
+                "state": state, "message": message, "at": time.time(),
+                "startLine": self.start_line, "lastLine": self.acked, "heightmap": bool(self.use_heightmap),
+            }
+            self.meta = {**self.meta, "lastRun": result}
+            try:
+                self.library.note_result(self.meta["id"], result)
+            except Exception:  # noqa: BLE001 - never let bookkeeping break a job
+                log.exception("cannot record the job result")
         self._journal(force=True)
         self._publish(force=True)
 

@@ -336,20 +336,41 @@ def build_router(
         if not data:
             raise ApiError(400, "empty program")
         name = (req.query.get("name") or ["program.nc"])[0]
+        if data[:4] == b"PK\x03\x04" or name.lower().endswith(".zip"):
+            return _jobs().library.add_zip(name, data)  # a set: the user picks the file to load
         meta = _jobs().library.add(name, data)
         if not _jobs().active:
             _jobs().select(meta["id"])
         return meta
 
     def jobs_list(_req: Request) -> Any:
-        return {"jobs": _jobs().library.list()}
+        lib = _jobs().library
+        return {"jobs": lib.list(), "sets": lib.sets()}
+
+    def sets_update(req: Request) -> Any:
+        body = req.json()
+        name = body.get("name")
+        if name is not None and (not isinstance(name, str) or not name.strip()):
+            raise ApiError(400, "name must be a non-empty string")
+        return _jobs().library.update_set(req.params["id"], name=name, order=body.get("order"))
+
+    def sets_delete(req: Request) -> Any:
+        j = _jobs()
+        lib = j.library
+        set_ids = {m["id"] for m in lib.list() if m.get("set") == req.params["id"]}
+        if j.meta and j.meta["id"] in set_ids:
+            if j.active or j.state == "interrupted":
+                raise ApiError(409, "a program of this set is running or interrupted")
+            j.unload()
+        lib.delete_set(req.params["id"])
+        return {"jobs": lib.list(), "sets": lib.sets()}
 
     def jobs_delete(req: Request) -> Any:
         j = _jobs()
         if j.meta and j.meta["id"] == req.params["id"]:
             j.unload()
         j.library.delete(req.params["id"])
-        return {"jobs": j.library.list()}
+        return {"jobs": j.library.list(), "sets": j.library.sets()}
 
     def job_state(_req: Request) -> Any:
         return _jobs().snapshot()
@@ -660,6 +681,8 @@ def build_router(
     add("POST", "/api/jobs", jobs_upload)
     add("GET", "/api/jobs", jobs_list)
     add("DELETE", "/api/jobs/{id}", jobs_delete)
+    add("PUT", "/api/jobs/sets/{id}", sets_update)
+    add("DELETE", "/api/jobs/sets/{id}", sets_delete)
     add("GET", "/api/job", job_state)
     add("GET", "/api/job/text", job_text)
     add("POST", "/api/job/select", job_select)

@@ -183,6 +183,7 @@ Legend:
 | Candle feature | 0.9 | Implementation | Phase |
 |---|---|---|---|
 | Open file (button/drag-drop), recent files | ✅ | Single upload `POST /api/jobs` (raw text, ≤ 50 MB). The server keeps a job library on disk (`<state>/jobs`) | P4 ✅ |
+| Program sets (not in Candle) | ✅ | A `.zip` upload (`PK` signature or `.zip` name) becomes a **set** (`jobs/sets/<id>.json`: name, source, ordered program ids); each program keeps its file name and path (a folder wrapping everything is dropped). Accepted: known G-code extensions, or text that looks like G-code; Gerber/Excellon (incl. `M48` headers)/CAD/documents, `__MACOSX` and hidden files are skipped and reported. Limits: 200 files, 200 MB expanded, 50 MB per program, no encrypted or nested zips. Default order by file-name words: back/bottom/B_Cu, align, front/top/F_Cu, drill/hole, cutout/edge/outline/profile, then natural name order. Library dialog: sets + "Single files", Load, ↑ ↓ reorder, rename, delete program or set, last run per program (`lastRun`: state, when, from/at line, heightmap). Program panel shows "set › file (n/N)" and **Next: …** after a program completes | P4+ ✅ |
 | Table: #, command, state, response | ✅ | Virtualised table (50k+ lines). Row states from the retained `job` event: done (executed), queued (acknowledged, in GRBL's planner), sent (awaiting ack), error | P4 ✅ |
 | Send / Pause / Stop / Reset | ✅ | `POST /api/job/start|pause|resume|stop`; Stop is the safe stop (hold, reset, restore; no alarm) | P4 ✅ |
 | Send from selected line with parser-state restore | ✅ | Server replays modal state, then safe entry (Z up, XY, spindle plus dwell, plunge at ≤ `entryPlungeFeed`). Refused if the program used G92 before the line or the position is unknown | P4 ✅ |
@@ -379,7 +380,8 @@ GET      /api/heightmap/interpolated            GET /api/heightmap/export (.map)
 GET      /api/heightmap/library  POST /api/heightmap/library/save|load|delete {name}
 POST     /api/heightmap/transform {gcode} → {gcode, stats}  (P4 uses it for the job's transformed variant)
 POST /api/jobs                 raw G-code body, ?name= → {id, name, lines, size} (selected when no job runs)
-GET  /api/jobs                 library     DELETE /api/jobs/{id}
+GET  /api/jobs                 library {jobs, sets}     DELETE /api/jobs/{id}
+POST /api/jobs?name=x.zip      zip → set {set, skipped}   PUT /api/jobs/sets/{id} {name?, order?}   DELETE /api/jobs/sets/{id}
 GET  /api/job                  state       GET /api/job/text (active variant, exactly what is streamed)
 POST /api/job/select           {jobId}     POST /api/job/unload     POST /api/job/heightmap {enabled}
 POST /api/job/start            {fromLine?}  POST /api/job/pause|resume|stop  (resume = Continue after an error or tool change)

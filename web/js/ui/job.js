@@ -6,6 +6,7 @@
 import { api } from "../api.js";
 import { $, $$ } from "./dom.js";
 import { registerAction } from "../keymap.js";
+import { initLibrary } from "./library.js";
 
 const ROW_H = 20;
 const ACTIVE = new Set(["starting", "running", "paused", "error", "toolchange"]);
@@ -57,47 +58,42 @@ export function initJob(store, log, view) {
 
   // -- library / upload -----------------------------------------------------
 
-  async function refreshLibrary() {
-    try {
-      const { jobs } = await api.jobs();
-      const sel = $("#job-library");
-      sel.replaceChildren(new Option("Library…", ""));
-      for (const j of jobs) {
-        const d = new Date(j.uploaded * 1000);
-        sel.add(new Option(`${j.name} · ${j.lines} lines · ${d.toLocaleDateString()} ${d.toLocaleTimeString().slice(0, 5)}`, j.id));
-      }
-    } catch { /* not connected to the server yet */ }
-  }
-
-  async function upload(file) {
-    if (!file) return;
-    if (file.size > 50 * 1024 * 1024) { log("program larger than 50 MB", "err"); return; }
-    log(`uploading ${file.name} (${(file.size / 1024).toFixed(0)} kB)…`);
-    try {
-      const meta = await api.jobUpload(file);
-      log(`uploaded ${meta.name}: ${meta.lines} lines`);
-      refreshLibrary();
-    } catch (e) {
-      log(`upload: ${e.message}`, "err");
-    }
-  }
+  const library = initLibrary(store, log);
 
   $("#job-file").addEventListener("change", (e) => {
-    upload(e.target.files[0]);
+    library.upload(e.target.files[0]);
     e.target.value = "";
   });
   const panel = $("#panel-program");
   panel.addEventListener("dragover", (e) => { e.preventDefault(); });
   panel.addEventListener("drop", (e) => {
     e.preventDefault();
-    upload(e.dataTransfer.files[0]);
+    library.upload(e.dataTransfer.files[0]);
   });
-  $("#job-library").addEventListener("focus", refreshLibrary);
-  $("#job-library").addEventListener("change", (e) => {
-    const id = e.target.value;
-    e.target.value = "";
+  $("#job-library").addEventListener("click", () => library.open());
+  $("#job-next").addEventListener("click", () => {
+    const id = $("#job-next").dataset.id;
     if (id) run(api.jobSelect(id), "load");
   });
+
+  // "set › file" for the loaded program, and the next program of its set.
+  function renderPlace() {
+    const j = store.state.job;
+    const v = j?.variant;
+    const place = j?.job ? library.placeOf(j.job.id) : null;
+    const name = place ? `${place.set.name} › ${j.job.path || j.job.name} (${place.index + 1}/${place.set.files.length})` : j?.job?.name;
+    $("#job-name").textContent = j?.job ? `${name} · ${v?.lines ?? 0} lines${v?.kind === "transformed" ? " · heightmap" : ""}` : "no program";
+    const next = $("#job-next");
+    const st = j?.state || "idle";
+    const show = place && place.next && !ACTIVE.has(st) && st !== "interrupted" && (st === "done" || j?.job?.lastRun?.state === "done");
+    next.hidden = !show;
+    if (show) {
+      next.dataset.id = place.next.id;
+      next.textContent = `Next: ${place.next.path || place.next.name}`;
+      next.title = `Load the next program of ${place.set.name}: ${place.next.path || place.next.name} (${place.index + 2}/${place.set.files.length})`;
+    }
+  }
+  library.onChange(renderPlace);
   $("#job-unload").addEventListener("click", () => run(api.jobUnload(), "unload"));
   $("#job-heightmap").addEventListener("change", (e) => {
     const on = e.target.checked;
@@ -286,11 +282,11 @@ export function initJob(store, log, view) {
     const active = ACTIVE.has(st);
     const v = j?.variant;
     loadText(j);
-    $("#job-name").textContent = j?.job ? `${j.job.name} · ${v?.lines ?? 0} lines${v?.kind === "transformed" ? " · heightmap" : ""}` : "no program";
+    renderPlace();
     $("#job-heightmap").checked = !!j?.heightmap?.enabled;
     $("#job-heightmap").disabled = active || st === "interrupted" || !j?.job;
     $("#job-unload").disabled = active || st === "interrupted" || !j?.job;
-    $("#job-library").disabled = active || st === "interrupted";
+    $("#job-library").disabled = false; // browsing is fine; Load is refused while a job runs
     $("#job-file").disabled = false;
     $("#job-start").disabled = !connected || active || st === "interrupted" || !j?.job || store.state.status?.state !== "Idle";
     renderRecovery(j);
@@ -387,6 +383,6 @@ export function initJob(store, log, view) {
     if (kind === "job" || kind === "snapshot" || kind === "status" || kind === "connection") update();
   });
   setInterval(() => { if (ACTIVE.has(store.state.job?.state)) update(); }, 1000);
-  refreshLibrary();
+  library.refresh();
   update();
 }

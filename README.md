@@ -87,6 +87,11 @@ A quick tour: *5 mm above surface* → *Probe Z* → set a map border → *Probe
 
 ### Running a job
 1. **Open…** (or drop a file on the Program panel) uploads it to the server's library (`<state-dir>/jobs`); **Library…** reloads earlier uploads.
+   **A board as a set:** upload the `.zip` of a PCB's programs. Every G-code file in it is kept together as a *set*
+   named after the zip (a second upload of the same name becomes "name (2)", so nothing clashes). Gerber, Excellon,
+   notes and `__MACOSX` files are skipped. The set is ordered back → align → front → drill → cut-out (by words in the
+   file names), then by name; fix it with ↑ ↓ in **Library…**, where you can also rename or delete it. Each program
+   shows how its last run ended. When one finishes, **Next: …** in the Program panel loads the next one.
 2. Tick **heightmap** to stream the compensated program instead (recomputed at Start if the map has changed).
 3. **Start** runs from line 1, or from the **from line** number (click a table row to pick one). Starting mid-program restores the modal state, raises to safe Z, moves to the start XY, starts the spindle with a dwell, and plunges at no more than the *entry plunge feed*.
 4. Progress in the table and 3D view: grey is done, violet is in GRBL's buffers. The ETA comes from a model of GRBL's planner using your `$110–$122` and `$11`, corrected as the job runs.

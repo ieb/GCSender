@@ -465,3 +465,24 @@ input.narrow { width: 56px; }
 .dialog.login input { font-size: 15px; padding: 6px 8px; }
 .dialog.login .error, .error.small { color: var(--danger); }
 #session-user { margin-left: 8px; }
+
+/* program library */
+.dialog.library { width: min(980px, 96vw); }
+.lib-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.lib-bar .spacer { flex: 1; }
+.lib-cols { display: grid; grid-template-columns: minmax(180px, 260px) 1fr; gap: 10px; min-height: 0; }
+.lib-sets { display: flex; flex-direction: column; gap: 4px; overflow: auto; max-height: 60vh; }
+.lib-set { display: flex; flex-direction: column; align-items: flex-start; text-align: left; gap: 2px; padding: 6px 8px; }
+.lib-set.active { border-color: var(--accent); background: var(--bg); box-shadow: inset 3px 0 0 var(--accent); }
+.lib-main { min-width: 0; display: flex; flex-direction: column; }
+.lib-table td.num { text-align: right; }
+.lib-table tr.loaded td { font-weight: 600; }
+.lib-table .ok { color: var(--ok); }
+.lib-table .warn { color: var(--warn); }
+.lib-actions { white-space: nowrap; text-align: right; }
+.lib-actions button { padding: 2px 8px; }
+@media (max-width: 700px) { .lib-cols { grid-template-columns: 1fr; } .lib-sets { max-height: 25vh; } }
+.lib-table td:nth-child(4) { white-space: nowrap; }
+.lib-table th { white-space: nowrap; }
+.lib-table td:nth-child(2) { overflow-wrap: break-word; }
+.lib-table { table-layout: auto; }
