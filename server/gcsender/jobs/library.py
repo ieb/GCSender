@@ -70,6 +70,8 @@ class Variant:
     digest: str = ""
     map_digest: str | None = None  # transformed: heightmap it was built from
     stats: dict[str, Any] | None = None  # transformed: transform stats
+    backlash: dict[str, Any] | None = None  # transformed: {"inputs": {b, start, zero}, "stats"}
+    backlash_sides: list[list[int | None]] | None = None  # side per axis after each line
 
     @classmethod
     def build(cls, kind: str, text: str, machine: Machine, max_line: int, **extra: Any) -> "Variant":
@@ -112,6 +114,7 @@ class Variant:
             "g92": self.g92,
             "mapDigest": self.map_digest,
             "stats": self.stats,
+            "backlash": self.backlash,
         }
 
 

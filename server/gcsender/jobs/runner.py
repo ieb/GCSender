@@ -34,6 +34,7 @@ from ..streamer import StreamerError
 from .analyze import Scanner, state_before
 from .estimate import Machine
 from .journal import Journal
+from ..backlash import compensate
 from .library import M6_RE, PAUSE_RE, JobError, JobLibrary, Variant
 
 log = logging.getLogger(__name__)
@@ -117,9 +118,42 @@ class JobRunner:
 
     @property
     def variant(self) -> Variant | None:
-        if self.use_heightmap and self.transformed is not None:
+        """What is streamed: heightmap and/or backlash compensated, else the original."""
+        if self.transformed is not None:
             return self.transformed
         return self.original
+
+    def _backlash_values(self) -> list[float] | None:
+        s = self.ctl.settings
+        if not s.get("backlashEnabled"):
+            return None
+        b = [float(s.get(k) or 0.0) for k in ("backlashX", "backlashY", "backlashZ")]
+        return b if any(v > 0 for v in b) else None
+
+    def _backlash_inputs(self) -> dict[str, Any] | None:
+        b = self._backlash_values()
+        if b is None:
+            return None
+        tracker = self.ctl.backlash
+        wcs = (self.ctl.model.modal or {}).get("wcs") or "G54"
+        g92 = self.ctl.model.offsets.get("G92")
+        return {
+            "b": b,
+            "start": list(tracker.side),
+            "zero": tracker.zero_sides(wcs, g92 if isinstance(g92, list) else None),
+        }
+
+    def _variant_current(self) -> bool:
+        """Is the streamed variant built from today's heightmap and backlash inputs?"""
+        want_bl = self._backlash_inputs()
+        have_bl = (self.transformed.backlash or {}).get("inputs") if self.transformed else None
+        if not self.use_heightmap and want_bl is None:
+            return self.transformed is None
+        if self.transformed is None:
+            return False
+        if self.use_heightmap and self.transformed.map_digest != self.maps.hm.digest():
+            return False
+        return want_bl == have_bl
 
     def executing(self) -> int:
         """Best guess of the last line GRBL has finished executing."""
@@ -179,6 +213,10 @@ class JobRunner:
                 "enabled": self.use_heightmap,
                 "stale": bool(self.use_heightmap and self.transformed and self.transformed.map_digest != hm_digest),
             },
+            "backlash": {
+                "enabled": self._backlash_values() is not None,
+                "applied": bool(v and v.backlash),
+            },
             "state": self.state,
             "message": self.message,
             "recovery": self.recovery,
@@ -237,6 +275,7 @@ class JobRunner:
             result = {
                 "state": state, "message": message, "at": time.time(),
                 "startLine": self.start_line, "lastLine": self.acked, "heightmap": bool(self.use_heightmap),
+                "backlash": bool(self.variant and self.variant.backlash),
             }
             self.meta = {**self.meta, "lastRun": result}
             try:
@@ -256,6 +295,7 @@ class JobRunner:
             "jobId": (self.meta or {}).get("id"),
             "name": (self.meta or {}).get("name"),
             "heightmap": self.use_heightmap,
+            "backlash": (v.backlash or {}).get("inputs") if v else None,
             "variantDigest": v.digest if v else None,
             "state": self.state,
             "startLine": self.start_line,
@@ -308,11 +348,20 @@ class JobRunner:
             self.meta = meta
             self.original = Variant.build("original", text, self._machine(), self._max_line())
             self.transformed = None
-            if self.use_heightmap:
-                self._build_transformed()
+            self._build_transformed()
             self._reset_progress()
             self._set("ready")
             return self.snapshot()
+
+    def settings_changed(self) -> None:
+        """Backlash settings changed: rebuild what will be streamed (not mid-job)."""
+        with self._lock:
+            if self.original is None or self.active or self.state == "interrupted":
+                return
+            if not self._variant_current():
+                self._build_transformed()
+                self._reset_progress()
+                self._set("ready")
 
     def unload(self) -> None:
         with self._lock:
@@ -337,28 +386,48 @@ class JobRunner:
         self._frozen_at = None
         self._paused_s = 0.0  # time waiting for the user (tool change, error prompt)
 
-    def _build_transformed(self) -> None:
+    def _build_transformed(self, backlash_inputs: dict[str, Any] | None = None, *, use_saved: bool = False) -> None:
+        """Heightmap (if ticked), then backlash (if enabled). ``use_saved``: rebuild
+        with ``backlash_inputs`` from the journal, so recovery gets the same lines."""
         assert self.original is not None
         text = "\n".join(self.original.raw) + "\n"
-        try:
-            result = self.maps.transform(text, float(self.ctl.settings.get("arcTolerance")))
-        except ValueError as e:  # MapError
-            raise ControllerError(f"heightmap: {e}") from None
+        tol = float(self.ctl.settings.get("arcTolerance"))
+        map_digest = stats = None
+        if self.use_heightmap:
+            try:
+                result = self.maps.transform(text, tol)
+            except ValueError as e:  # MapError
+                raise ControllerError(f"heightmap: {e}") from None
+            text, map_digest, stats = result["gcode"], self.maps.hm.digest(), result["stats"]
+        inputs = backlash_inputs if use_saved else self._backlash_inputs()
+        bl = None
+        if inputs:
+            r = compensate(text, inputs["b"], inputs["start"], inputs["zero"], tol)
+            text = r["gcode"]
+            bl = {"inputs": inputs, "stats": r["stats"]}
+        if not self.use_heightmap and bl is None:
+            self.transformed = None
+            return
         self.transformed = Variant.build(
-            "transformed", result["gcode"], self._machine(), self._max_line(),
-            map_digest=self.maps.hm.digest(), stats=result["stats"],
+            "transformed", text, self._machine(), self._max_line(), map_digest=map_digest, stats=stats,
         )
+        if bl is not None:
+            self.transformed.backlash = bl
+            self.transformed.backlash_sides = r["sides"]
 
     def set_heightmap(self, enabled: bool) -> dict[str, Any]:
         with self._lock:
             if self.active:
                 raise ControllerError("a job is running")
             self._no_recovery()
-            if enabled and self.original is not None:
-                self._build_transformed()
+            previous = self.use_heightmap
             self.use_heightmap = enabled
-            if not enabled:
-                self.transformed = None
+            if self.original is not None:
+                try:
+                    self._build_transformed()
+                except ControllerError:
+                    self.use_heightmap = previous
+                    raise
             self._reset_progress()
             self._set("ready" if self.original else "idle")
             return self.snapshot()
@@ -385,9 +454,8 @@ class JobRunner:
                 raise ControllerError(f"a job needs Idle (machine is {self.ctl.machine_state})")
             if self.ctl.busy:
                 raise ControllerError(f"busy: {self.ctl.busy}")
-            if self.use_heightmap:
-                if self.transformed is None or self.transformed.map_digest != self.maps.hm.digest():
-                    self._build_transformed()  # the map changed since: recompute
+            if not self._variant_current():
+                self._build_transformed()  # the map, backlash settings or the axes' sides changed: recompute
             v = self.variant
             assert v is not None
             if v.too_long:
@@ -516,6 +584,14 @@ class JobRunner:
         lines = [f"G21G90{s['plane']}{s['wcs']}"]
         if wz is None or wz < safe or not same_wcs:  # WPos is relative to the active WCS
             lines.append(f"G0Z{_f(safe)}")
+        if v.backlash and v.backlash_sides and n > 0:
+            # Arrive at the start XY moving the way the program was moving there,
+            # so the slack is already taken up on the side the program assumes.
+            sides = v.backlash_sides[n - 1]
+            b = v.backlash["inputs"]["b"]
+            pre = [t - sides[i] * max(1.0, 3 * b[i]) if sides[i] and b[i] > 0 else t for i, t in enumerate((x, y))]
+            if pre != [x, y]:
+                lines.append(f"G0X{_f(pre[0])}Y{_f(pre[1])}")
         lines.append(f"G0X{_f(x)}Y{_f(y)}")
         if s["spindle"] in ("M3", "M4"):
             lines.append(f"{s['spindle']}S{_f(s['speed'])}")
@@ -806,8 +882,7 @@ class JobRunner:
             self.meta = meta
             self.original = Variant.build("original", text, self._machine(), self._max_line())
             self.use_heightmap = bool(data.get("heightmap"))
-            if self.use_heightmap:
-                self._build_transformed()
+            self._build_transformed(data.get("backlash"), use_saved=True)
             if self.variant is None or self.variant.digest != data.get("variantDigest"):
                 error = "the program or heightmap has changed since, so line numbers no longer match"
         except (JobError, ControllerError) as e:

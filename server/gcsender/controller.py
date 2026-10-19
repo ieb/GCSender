@@ -17,6 +17,7 @@ import threading
 import time
 from typing import Any, Callable
 
+from .backlash import BacklashTracker
 from . import capabilities
 from .errors import ControllerError
 from .events import EventBus
@@ -66,6 +67,8 @@ class Controller:
     ):
         self.bus = bus
         self.settings = settings or SettingsStore(None)
+        state_dir = self.settings.path.parent if self.settings.path is not None else None
+        self.backlash = BacklashTracker(state_dir / "backlash.json" if state_dir is not None else None)
         self.transcript = transcript or Transcript(None)
         self._make_transport = make_transport
         self._poll_override = poll_interval
@@ -174,6 +177,11 @@ class Controller:
     def update_settings(self, changes: dict[str, Any]) -> dict[str, Any]:
         values = self.settings.update(changes)
         self.bus.publish("app.settings", values, retain=True)
+        if self.job_runner is not None and any(k.startswith("backlash") for k in changes):
+            try:
+                self.job_runner.settings_changed()  # rebuild the loaded program's compensation
+            except ControllerError as e:
+                log.warning("backlash: cannot rebuild the loaded program: %s", e)
         return values
 
     # ------------------------------------------------------------ connection
@@ -289,6 +297,8 @@ class Controller:
         if upper == "$C" and self._machine_state == "Check":
             # Leaving check mode resets GRBL; restore the parser state afterwards.
             self._arm_reset(restore=None)
+        if "G10" in upper or "G92" in upper:
+            self.backlash.note_zero_command(upper, (self.model.modal or {}).get("wcs"))
         self._console("tx", line, source)
         try:
             pending = streamer.send(line, source, timeout=timeout)
@@ -615,6 +625,7 @@ class Controller:
             state = st["state"]
             self._machine_state = state
             self.model.status = st
+            self.backlash.observe_mpos(st.get("mpos"))
             with self._status_cond:
                 self._status_seq += 1
                 self._status_cond.notify_all()
@@ -656,8 +667,11 @@ class Controller:
         elif t in ("offset", "tlo", "probe"):
             key = fb.get("name") or {"tlo": "TLO", "probe": "PRB"}[t]
             with self._lock:
+                old = self.model.offsets.get(key)
                 self.model.offsets[key] = fb["value"] if t != "probe" else {"value": fb["value"], "ok": fb["ok"]}
                 offsets = dict(self.model.offsets)
+            if t == "offset":
+                self.backlash.on_offsets(key, old, fb["value"])  # a zero changed: remember the side
             self.bus.publish("offsets", offsets, retain=True)
         elif t == "version":
             self.model.build = {"version": fb["version"], "info": fb.get("info", "")}

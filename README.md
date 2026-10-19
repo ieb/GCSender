@@ -107,6 +107,21 @@ A quick tour: *5 mm above surface* → *Probe Z* → set a map border → *Probe
 
 The simulator moves at constant speed (no acceleration), so its run times are shorter than the estimate. On the real machine the estimate includes acceleration.
 
+### Backlash compensation
+GRBL 0.9 has none, so the server compensates the programs it streams (*Settings → Application → Backlash
+compensation*: on/off and X/Y/Z in mm, measured with a dial indicator as described there).
+- Where an axis reverses direction, a short take-up move on that axis alone is inserted first, so cuts after a
+  corner are not skewed. Arcs are split into short lines, so reversals inside them are caught too.
+- A position is exact when the axis is on the same side as when its work zero was set. The server tracks which side
+  each axis is on (from the position reports and jog steps), and records the side whenever a zero is set: Probe Z, the
+  zero buttons, `G10`, `G92`. Probe Z zeroes on the way down, so cut depths are right. Targets on the other side are
+  moved by the backlash.
+- It applies on top of the heightmap. The Program panel shows *· backlash*; the take-up counts are in its tooltip.
+  Starting from a line approaches the start point from the side the program was moving, and recovery after a restart
+  rebuilds exactly the same program.
+- Not compensated: jogging, the console, user commands and probing. A program that starts in incremental mode (`G91`)
+  without an absolute position is streamed unchanged, as for heightmaps.
+
 ### If the server stops mid-job
 The server keeps a journal (`<state-dir>/journal.json`). When it starts again (or the USB link comes back) the job shows as **interrupted** with a recovery card:
 - **The board was not reset** (it re-attached): the machine finishes the moves it had buffered. The server then finds the line whose end matches where the machine stopped and offers **Resume here**, which continues with no extra moves.

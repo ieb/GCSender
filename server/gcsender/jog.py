@@ -140,6 +140,7 @@ class Jogger:
             raise ControllerError("zero-length jog", 400)
         f = self.max_feed(unit, feed)
         ctl.boost_polling(2 + length / max(f / 60, 0.1))
+        ctl.backlash.note_move(delta)  # its direction, even if status polls miss it
         if self.family == "1.1":
             r = ctl.command(f"$J=G91G21{words}F{_f(f)}", source="jog", follow_up=False)
         else:

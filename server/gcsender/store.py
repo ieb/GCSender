@@ -50,6 +50,11 @@ SCHEMA: dict[str, tuple[type, Any, float | None, float | None]] = {
     "entryPlungeFeed": (float, 100.0, 1.0, 5000.0),  # max feed for the plunge when starting from a line (mm/min)
     # Heightmap transform
     "arcTolerance": (float, 0.01, 0.001, 0.5),  # max chord error when arcs are linearised (mm)
+    # Backlash compensation of streamed programs (mm per axis; 0 = none)
+    "backlashEnabled": (bool, False, None, None),
+    "backlashX": (float, 0.0, 0.0, 2.0),
+    "backlashY": (float, 0.0, 0.0, 2.0),
+    "backlashZ": (float, 0.0, 0.0, 2.0),
 }
 
 NUMBER_LISTS = {"jogSteps", "jogFeeds"}

@@ -146,6 +146,7 @@ class BugReports:
             section("grblSettings", lambda: {str(k): v.get("raw") for k, v in ctl.model.settings.items()})
             section("grblWarnings", lambda: ctl.model.warnings(ctl.caps))
             section("appSettings", lambda: ctl.settings.all())
+            section("backlash", lambda: ctl.backlash.snapshot())
             section("internals", lambda: {
                 k: getattr(ctl, k, None) for k in (
                     "_offsets_dirty", "_settings_dirty", "_refresh_pending", "_restore_pending", "_expect_reset",

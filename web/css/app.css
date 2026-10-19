@@ -494,3 +494,4 @@ body.viewer [data-control] :is(button, input, select, textarea, label.button-lik
 }
 body.viewer [data-control]:is(button, input, select, form) { pointer-events: none; opacity: .45; }
 .view-only { background: var(--warn); color: #fff; border-radius: 10px; padding: 2px 9px; font-size: 12px; font-weight: 600; margin-left: 8px; white-space: nowrap; }
+.form-grid .form-note { grid-column: 1 / -1; margin: 0; }

@@ -82,7 +82,11 @@ export function initJob(store, log, view) {
     const v = j?.variant;
     const place = j?.job ? library.placeOf(j.job.id) : null;
     const name = place ? `${place.set.name} › ${j.job.path || j.job.name} (${place.index + 1}/${place.set.files.length})` : j?.job?.name;
-    $("#job-name").textContent = j?.job ? `${name} · ${v?.lines ?? 0} lines${v?.kind === "transformed" ? " · heightmap" : ""}` : "no program";
+    const tags = `${v?.mapDigest ? " · heightmap" : ""}${v?.backlash ? " · backlash" : ""}`;
+    $("#job-name").textContent = j?.job ? `${name} · ${v?.lines ?? 0} lines${tags}` : "no program";
+    $("#job-name").title = v?.backlash
+      ? `Backlash compensated: X ${v.backlash.inputs.b[0]} Y ${v.backlash.inputs.b[1]} Z ${v.backlash.inputs.b[2]} mm; take-up moves X ${v.backlash.stats.takeups[0]}, Y ${v.backlash.stats.takeups[1]}, Z ${v.backlash.stats.takeups[2]}`
+      : "";
     const next = $("#job-next");
     const st = j?.state || "idle";
     const show = place && place.next && !ACTIVE.has(st) && st !== "interrupted" && (st === "done" || j?.job?.lastRun?.state === "done");
