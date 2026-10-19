@@ -55,12 +55,16 @@ export function initProbe(store, log) {
     const ok = confirm(
       `Probe Z: the tool moves DOWN up to ${app.probeDepth} mm until it touches.\n\n` +
         "• The probe clip is attached and the plate/work is under the tool\n" +
-        "• You tested the probe input (Test: touching) since connecting\n\nContinue?",
+        "• The probe input reads open (Test: open) and touching the clip to the plate would stop it\n\nContinue?",
     );
     if (!ok) return;
     api.probeZ().catch((e) => say(e.message, true));
   });
-  for (const [id, expect] of [["#probe-test-open", "open"], ["#probe-test-closed", "closed"]]) {
+  $("#probe-goto-xy0").addEventListener("click", () => {
+    say("moving to X0 Y0…");
+    api.goto({ x: 0, y: 0 }).then(() => say("at work X0 Y0"), (e) => say(e.message, true));
+  });
+  for (const [id, expect] of [["#probe-test-open", "open"]]) {
     $(id).addEventListener("click", () => {
       say("testing…");
       api.probeTest(expect).then(
@@ -81,7 +85,7 @@ export function initProbe(store, log) {
     const p = store.state.probe || {};
     const idle = store.state.connection.state === "connected" && (store.state.status || {}).state === "Idle";
     const running = p.state === "running";
-    for (const id of ["#probe-z", "#probe-test-open", "#probe-test-closed"]) $(id).disabled = !idle || running;
+    for (const id of ["#probe-z", "#probe-test-open", "#probe-goto-xy0"]) $(id).disabled = !idle || running;
     if (p.kind === "z") {
       if (running) say("probing Z…");
       else if (p.state === "done" && p.result) {

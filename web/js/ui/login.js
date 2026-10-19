@@ -2,7 +2,7 @@
 // the API token and never shows this. Elsewhere the user logs in; the server
 // sets an HttpOnly session cookie, which scripts on the page cannot read.
 
-import { session, token, ApiError } from "../api.js";
+import { session, token, ApiError, setViewOnly } from "../api.js";
 import { $ } from "./dom.js";
 
 function dialog() {
@@ -61,9 +61,21 @@ function showUser(info) {
   });
 }
 
+/** View only unless this browser is on the server's computer. */
+function applyRole(info) {
+  const viewer = info.control === false;
+  setViewOnly(viewer);
+  document.body.classList.toggle("viewer", viewer);
+  $("#view-only").hidden = !viewer;
+}
+
 /** Resolve once this page may use the API (token, or a login session). */
 export async function ensureSession() {
-  if (token) return { via: "token" };
+  if (token) {
+    // The token is only embedded for this computer, but ask anyway (cheap, and exact).
+    try { applyRole(await session.info()); } catch { /* server not up yet: the token implies local */ }
+    return { via: "token" };
+  }
   let info;
   for (;;) {
     try {
@@ -79,6 +91,7 @@ export async function ensureSession() {
     info = await session.info();
   }
   showUser(info);
+  applyRole(info);
   let asking = false;
   window.addEventListener("gcs-login-required", async () => {
     if (asking) return;

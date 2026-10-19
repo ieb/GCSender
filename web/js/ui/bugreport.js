@@ -1,7 +1,7 @@
 // Bug reports: describe a problem and save a report on the server with the
 // machine, job, log and browser state; list and download earlier reports.
 
-import { bugReports, ApiError } from "../api.js";
+import { bugReports, ApiError, isViewOnly } from "../api.js";
 import { $ } from "./dom.js";
 
 const VISIBLE = [
@@ -136,6 +136,7 @@ export function initBugReport(store) {
         status.textContent = `cannot delete: ${e.message}`;
       }
     });
+    del.hidden = isViewOnly();
     act.append(dl, " ", del);
     tr.append(when, title, st, size, act);
     return tr;

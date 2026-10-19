@@ -115,7 +115,7 @@ def login(server, password=PASSWORD):
 
 def test_login_sets_an_httponly_cookie_that_authorises_the_api(srv):
     status, body, _ = call(srv, "GET", "/api/session")
-    assert body == {"authenticated": False, "via": None, "user": None, "loginAvailable": True}
+    assert body == {"authenticated": False, "control": True, "via": None, "user": None, "loginAvailable": True}
     assert call(srv, "GET", "/api/state")[0] == 401
     assert login(srv, "wrong password")[0] == 401
     status, body, cookie = login(srv)
@@ -126,7 +126,7 @@ def test_login_sets_an_httponly_cookie_that_authorises_the_api(srv):
     assert sid.split("=", 1)[1] not in json.dumps(body)  # the page never sees the session id
     jar = {"Cookie": sid}
     assert call(srv, "GET", "/api/state", headers=jar)[0] == 200
-    assert call(srv, "GET", "/api/session", headers=jar)[1] == {"authenticated": True, "via": "session", "user": "ian", "loginAvailable": True}
+    assert call(srv, "GET", "/api/session", headers=jar)[1] == {"authenticated": True, "control": True, "via": "session", "user": "ian", "loginAvailable": True}
     # Changes need the X-GCS-Request header with a cookie (CSRF).
     assert call(srv, "PUT", "/api/settings", {}, headers=jar)[0] == 403
     assert call(srv, "PUT", "/api/settings", {}, headers={**jar, "X-GCS-Request": "1"})[0] not in (401, 403)  # 503: no controller here
@@ -167,7 +167,7 @@ def test_no_users_means_no_login(tmp_path):
 
 
 def test_lan_clients_get_no_token_and_cannot_use_it_in_urls(srv, monkeypatch):
-    monkeypatch.setattr(webserver.Handler, "_client_is_loopback", lambda self: False)
+    monkeypatch.setattr(webserver.Handler, "_client_is_local", lambda self: False)
     status, html, _ = call(srv, "GET", "/")
     assert status == 200 and TOKEN.encode() not in html
     assert call(srv, "GET", f"/api/state?t={TOKEN}")[0] == 401  # not in a LAN URL

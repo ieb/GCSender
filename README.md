@@ -6,12 +6,12 @@ over HTTP and server-sent events, so reloading or closing the page never interru
 
 See [docs/PLAN.md](docs/PLAN.md) for the full plan, feature inventory and phases.
 
-**Status:** phases 0–6 are complete, verified on the simulator only; the hardware check is still deferred.
+**Status:** phases 0–6 are complete and verified on the simulator and on the C3018 (GRBL 0.9j): two PCBs cut without problems.
 - Working: connection and firmware detection (fresh boot or re-attach), live status, and the console with error help.
 - Control: Hold, Resume, Door, Reset (with offset and parser-state restore), Unlock and Check.
 - Jogging: step only. Each click or key press moves exactly 0.01, 0.05, 0.1, 0.5, 1, 5 or 10 mm. A long press is always one step (no auto-repeat), and there is no hold-to-move mode. Keys are remappable and Esc stops. There is an optional jog box.
 - Coordinates: G54–G59 select/zero, G92, and go-to with safe Z. Spindle and coolant controls.
-- Probing: Z probe (plate, two-stage), probe-input test for GRBL 0.9.
+- Probing: Z probe (plate, two-stage), probe-input test (open) for GRBL 0.9, and Go XY0 from the probe panel.
 - Heightmaps: probe a grid, edit values, save/load a library, import/export Candle `.map` files, and compensate a G-code file on the server (download and 3D preview).
 - Jobs: upload (button or drag-drop) to a server-side library, then Start / Pause / Stop, start from any line (safe entry), M6 tool-change pause (jog and probe allowed), error hold with Continue/Stop, start/end commands, and feed override (software on 0.9, real-time feed/rapid/spindle on 1.1). The server streams the job, so a page reload shows the job exactly where it is. Run the heightmap-compensated version with one checkbox.
 - Recovery: a journal lets a restarted server (or a reconnect after a lost USB link) resume an interrupted job: seamlessly when the board was not reset, or after a guided re-zero with a safe entry when it was.
@@ -22,7 +22,7 @@ See [docs/PLAN.md](docs/PLAN.md) for the full plan, feature inventory and phases
 - Display: light/dark/system theme, toolpath colours and 3D options, collapsible panels and draggable dividers (with a layout lock), larger touch targets on tablets, and a Help dialog. Works on desktop and tablet widths.
 - Logs: application log and serial transcripts.
 
-All planned phases are done; what remains is the deferred hardware checks listed in [docs/PLAN.md](docs/PLAN.md) §11, then the *Later* backlog.
+All planned phases are done and checked on the machine; what remains is the *Later* backlog in [docs/PLAN.md](docs/PLAN.md).
 
 **Jogging is step only, by design.** Continuous (hold-to-move) jogging is deliberately not provided: GRBL 0.9 cannot cancel a jog,
 so any overrun would go into the workpiece. Separate presses queue and run in order; holding a key or button never produces more than one step.
@@ -59,6 +59,14 @@ uv run gcsender --lan --port /dev/tty.usbserial-XXXX
 
 These change `<state-dir>/users.json` and take effect on a running server. A login lasts until **Log out**, 7 days
 without use, or 30 days. The browser on the server's own computer needs no login.
+
+**Only the server's own computer controls the machine.** Browsers on other computers are *view only* (a 👁 badge):
+they see everything live, can upload programs and zips (which wait in the library rather than replacing what is
+loaded) and rename or reorder sets, and can report a problem. Connecting, jogging, zeroing, probing, running jobs,
+user commands and settings are refused by the server. Opening GCSender on the server's computer through its LAN
+address also counts as local. The rule depends on where a request comes from, not on the credential, so the API
+token used from another computer is view only too. Do not put GCSender behind a reverse proxy on the same computer:
+every request would then look local.
 
 ### Options
 | Option | Meaning |
@@ -97,7 +105,7 @@ A quick tour: *5 mm above surface* → *Probe Z* → set a map border → *Probe
 4. Progress in the table and 3D view: grey is done, violet is in GRBL's buffers. The ETA comes from a model of GRBL's planner using your `$110–$122` and `$11`, corrected as the job runs.
 5. **On an M6** the job waits for the machine to stop, runs the *tool-change commands* (default `M5`), and asks. You can jog and probe Z, then **Continue**. **On an M0** (program pause; many CAM tools write a tool change as `(MSG, Change tool…)` + `M0`) the job pauses the same way and shows the message. **M1** (optional stop) does too, unless turned off. **On an error** the machine is feed-held and you choose Continue or Stop. Both are set in *Settings → Application → Jobs*.
 
-The simulator moves at constant speed (no acceleration), so its run times are shorter than the estimate. The ETA on the real machine is a deferred hardware check.
+The simulator moves at constant speed (no acceleration), so its run times are shorter than the estimate. On the real machine the estimate includes acceleration.
 
 ### If the server stops mid-job
 The server keeps a journal (`<state-dir>/journal.json`). When it starts again (or the USB link comes back) the job shows as **interrupted** with a recovery card:

@@ -21,6 +21,19 @@ function resolveToken() {
 
 export const token = resolveToken();
 
+// View only (another computer): the server refuses anything that controls the
+// machine; refuse it here too, with a clear message, instead of a round trip.
+const VIEWER_ALLOWED = [
+  ["POST", /^\/api\/jobs$/],
+  ["PUT", /^\/api\/jobs\/sets\/[^/]+$/],
+  ["POST", /^\/api\/bugreports$/],
+  ["POST", /^\/api\/(login|logout)$/],
+];
+export const VIEW_ONLY_MESSAGE = "view only: the machine can only be controlled from the browser on the computer running GCSender";
+let viewOnly = false;
+export function setViewOnly(on) { viewOnly = !!on; }
+export function isViewOnly() { return viewOnly; }
+
 export class ApiError extends Error {
   constructor(status, message) {
     super(message);
@@ -29,6 +42,10 @@ export class ApiError extends Error {
 }
 
 export async function request(method, path, body, { raw = false } = {}) {
+  if (viewOnly && method !== "GET" && method !== "HEAD") {
+    const bare = path.split("?")[0];
+    if (!VIEWER_ALLOWED.some(([m, rx]) => m === method && rx.test(bare))) throw new ApiError(403, VIEW_ONLY_MESSAGE);
+  }
   const headers = { "X-GCS-Request": "1" };
   if (token) headers["X-GCS-Token"] = token;
   const init = { method, headers, cache: "no-store" };

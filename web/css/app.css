@@ -486,3 +486,11 @@ input.narrow { width: 56px; }
 .lib-table th { white-space: nowrap; }
 .lib-table td:nth-child(2) { overflow-wrap: break-word; }
 .lib-table { table-layout: auto; }
+
+/* view only (another computer): machine controls are shown but cannot be used */
+body.viewer [data-control] :is(button, input, select, textarea, label.button-like, a.button-like, label):not([data-viewer-ok], [data-viewer-ok] *) {
+  pointer-events: none;
+  opacity: .45;
+}
+body.viewer [data-control]:is(button, input, select, form) { pointer-events: none; opacity: .45; }
+.view-only { background: var(--warn); color: #fff; border-radius: 10px; padding: 2px 9px; font-size: 12px; font-weight: 600; margin-left: 8px; white-space: nowrap; }

@@ -339,7 +339,8 @@ def build_router(
         if data[:4] == b"PK\x03\x04" or name.lower().endswith(".zip"):
             return _jobs().library.add_zip(name, data)  # a set: the user picks the file to load
         meta = _jobs().library.add(name, data)
-        if not _jobs().active:
+        # Only the operator's own upload replaces what is loaded; a viewer's waits in the library.
+        if req.control and not _jobs().active and _jobs().state != "interrupted":
             _jobs().select(meta["id"])
         return meta
 

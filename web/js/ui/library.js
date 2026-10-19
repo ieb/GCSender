@@ -1,7 +1,7 @@
 // Program library: single programs and sets (a zip of a PCB's programs,
 // uploaded together and kept in order). Pick a set, then the program to load.
 
-import { api } from "../api.js";
+import { api, isViewOnly } from "../api.js";
 import { $ } from "./dom.js";
 
 const ACTIVE = new Set(["starting", "running", "paused", "error", "toolchange"]);
@@ -114,7 +114,7 @@ export function initLibrary(store, log) {
     const loadedId = store.state.job?.job?.id;
     const busy = jobActive();
     $("#lib-rename").hidden = !set;
-    $("#lib-delete-set").hidden = !set;
+    $("#lib-delete-set").hidden = !set || isViewOnly();
     titleEl.textContent = set ? set.name : current === SINGLE ? "Single files" : "Choose a set";
     const rows = files.map((f, i) => {
       const tr = document.createElement("tr");
@@ -145,7 +145,8 @@ export function initLibrary(store, log) {
           dlg.close();
         } catch (e) { statusEl.textContent = `load: ${e.message}`; }
       }, f.id === loadedId ? "" : "primary");
-      load.disabled = busy || f.id === loadedId;
+      load.disabled = busy || f.id === loadedId || isViewOnly();
+      if (isViewOnly()) load.title = "View only: loading is done at the computer running GCSender";
       act.append(load);
       if (set) {
         const move = (d) => async () => {
@@ -170,7 +171,8 @@ export function initLibrary(store, log) {
           await refresh();
         } catch (e) { statusEl.textContent = e.message; }
       });
-      del.disabled = busy && f.id === loadedId;
+      del.disabled = (busy && f.id === loadedId) || isViewOnly();
+      if (isViewOnly()) del.title = "View only: deleting is done at the computer running GCSender";
       act.append(del);
       tr.append(n, name, lines, last, act);
       return tr;

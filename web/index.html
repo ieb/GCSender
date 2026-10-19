@@ -13,7 +13,7 @@
 <body>
   <header class="topbar">
     <div class="brand">GCSender</div>
-    <div class="conn" id="conn">
+    <div class="conn" id="conn" data-control>
       <select id="conn-port" title="Serial port"></select>
       <button id="conn-refresh" type="button" title="Refresh the list of serial ports on the server">⟳</button>
       <select id="conn-baud" title="Baud rate">
@@ -30,6 +30,7 @@
       <button id="open-bugreport" type="button" title="Report a problem: saves a bug report on the server with what you describe plus the machine, job, log and browser state, so it can be diagnosed later. Past reports can be downloaded here.">🐞 Report</button>
       <button id="open-help" type="button" title="Help: how to use GCSender, safety notes and troubleshooting">Help</button>
     </div>
+    <span id="view-only" class="view-only" hidden title="View only: this browser is on another computer. You can watch, upload programs and organise sets; the machine is controlled only from the browser on the computer running GCSender.">👁 View only</span>
     <span id="session-user" class="muted small" hidden title="Logged in as this user (the session is an HttpOnly cookie)"></span>
     <button id="logout" type="button" hidden title="Log out: ends this session on the server">Log out</button>
     <div class="link" id="link" title="Server link"><span class="dot"></span><span id="link-text">offline</span></div>
@@ -67,7 +68,7 @@
         <button title="Z probing, the heightmap (surface map for PCB work) and, in simulate mode, the virtual surface" type="button" class="tab" data-left-tab="probe" role="tab">Probe &amp; heightmap</button>
       </nav>
 
-      <section class="panel sim-panel" id="panel-sim" data-group="probe" data-unavailable hidden>
+      <section class="panel sim-panel" id="panel-sim" data-control data-group="probe" data-unavailable hidden>
         <h2><span>Simulator · virtual surface</span><span class="muted small">simulate mode only</span></h2>
         <p class="muted small">The simulated probe input closes when the tool tip reaches this surface (machine coordinates).</p>
         <div class="row">
@@ -101,7 +102,7 @@
         </div>
       </section>
 
-      <section class="panel" id="panel-probe" data-group="probe" hidden>
+      <section class="panel" id="panel-probe" data-control data-group="probe" hidden>
         <h2>Z probe</h2>
         <div class="form-grid compact" id="probe-form">
           <label for="pr-plate">Plate thickness</label><input id="pr-plate" data-setting="probePlate" type="number" step="0.01" min="0">
@@ -116,12 +117,12 @@
         <div class="buttons three">
           <button type="button" id="probe-z" class="primary" title="Probe down (G38.2) from here and set work Z">Probe Z</button>
           <button type="button" id="probe-test-open" title="With nothing touching: checks the probe input reads open">Test: open</button>
-          <button type="button" id="probe-test-closed" title="Hold the clip against the plate/bit: checks the probe input triggers">Test: touching</button>
+          <button type="button" id="probe-goto-xy0" title="Go to work X0 Y0: raise to safe Z if below it, then rapid to the work origin (e.g. to probe Z there, at the heightmap origin)">Go XY0</button>
         </div>
         <div id="probe-status" class="muted small"></div>
       </section>
 
-      <section class="panel" id="panel-heightmap" data-group="probe" hidden>
+      <section class="panel" id="panel-heightmap" data-control data-group="probe" hidden>
         <h2><span>Heightmap</span><span id="hm-name" class="muted small"></span></h2>
         <form id="hm-form" class="hm-form" autocomplete="off">
           <span class="lbl">Border X / Y</span><input name="x" type="number" step="0.1"><input name="y" type="number" step="0.1">
@@ -157,7 +158,7 @@
         </div>
         <div class="row">
           <label class="file-button">Import .map…<input type="file" id="hm-import" accept=".map,.txt" hidden></label>
-          <a title="Download the current heightmap as a Candle-compatible .map file" id="hm-export" class="button-like" href="#" download>Export .map</a>
+          <a title="Download the current heightmap as a Candle-compatible .map file" id="hm-export" data-viewer-ok class="button-like" href="#" download>Export .map</a>
         </div>
         <h3 class="sub">Apply to a program</h3>
         <div class="row">
@@ -168,7 +169,7 @@
         <div id="hm-transform-info" class="muted small"></div>
       </section>
 
-      <section class="panel" id="panel-jog" data-group="machine">
+      <section class="panel" id="panel-jog" data-control data-group="machine">
         <h2>
           <span>Jog</span>
           <label class="h2-tool" title="One step per key press with the keyboard (arrows, PgUp/PgDn, numpad); holding a key does not repeat. Esc always stops."><input type="checkbox" id="jog-keyboard"> keyboard</label>
@@ -200,7 +201,7 @@
         <div id="jog-info" class="muted small"></div>
       </section>
 
-      <section class="panel" id="panel-wcs" data-group="machine">
+      <section class="panel" id="panel-wcs" data-control data-group="machine">
         <h2>Coordinates</h2>
         <div class="seg" id="wcs-select">
           <button title="Work coordinate system 1 (G54): the default. Each of G54–G59 stores its own work zero (an offset from machine zero) in GRBL's EEPROM, so it survives power cycles. Click to make G54 active; positions and zeroing then refer to it." type="button" data-wcs="G54">G54</button><button title="Work coordinate system 2 (G55): a second stored work zero, e.g. for a second part or fixture. Click to make it active." type="button" data-wcs="G55">G55</button>
@@ -226,7 +227,7 @@
         <div id="wcs-offsets" class="muted small mono"></div>
       </section>
 
-      <section class="panel" id="panel-spindle" data-group="machine">
+      <section class="panel" id="panel-spindle" data-control data-group="machine">
         <h2>Spindle &amp; coolant</h2>
         <div class="row">
           <input type="number" id="spindle-rpm" class="mono" min="0" step="1" title="Spindle speed (S)">
@@ -239,13 +240,13 @@
         </div>
       </section>
 
-      <section class="panel" id="panel-macros" data-group="machine">
+      <section class="panel" id="panel-macros" data-control data-group="machine">
         <h2><span>User commands</span><button type="button" id="macros-edit" class="link-button" title="Add, change or remove user commands">edit</button></h2>
         <div id="macros-buttons" class="macro-buttons"></div>
         <div id="macro-status" class="small muted mono"></div>
       </section>
 
-      <section class="panel" id="panel-control" data-group="machine">
+      <section class="panel" id="panel-control" data-control data-group="machine">
         <h2>Control</h2>
         <div class="buttons">
           <button type="button" data-rt="hold" title="Hold (!): feed hold. Decelerates to a stop without losing position; Resume continues">Hold</button>
@@ -293,10 +294,10 @@
         <button title="The loaded program: open, start, pause, stop, progress and line table" type="button" class="tab active" data-bottom="program" role="tab">Program <span id="job-tab-badge" class="small muted"></span></button>
         <button title="Everything sent to and received from GRBL; type commands here" type="button" class="tab" data-bottom="console" role="tab">Console</button>
       </div>
-      <section class="panel bottom-panel" id="panel-program" data-bottom-body="program">
+      <section class="panel bottom-panel" id="panel-program" data-control data-bottom-body="program">
         <div class="job-bar">
-          <label class="button-like" title="Upload a G-code file, or a .zip of a board's programs (kept together as a set), to the server's library">Open…<input type="file" id="job-file" accept=".nc,.gcode,.ngc,.tap,.cnc,.txt,.gc,.g,.zip" hidden></label>
-          <button type="button" id="job-library" title="Library: sets (zips of a board's programs) and single programs on the server; load, reorder, rename or delete">Library…</button>
+          <label class="button-like" data-viewer-ok title="Upload a G-code file, or a .zip of a board's programs (kept together as a set), to the server's library">Open…<input type="file" id="job-file" accept=".nc,.gcode,.ngc,.tap,.cnc,.txt,.gc,.g,.zip" hidden></label>
+          <button type="button" id="job-library" data-viewer-ok title="Library: sets (zips of a board's programs) and single programs on the server; load, reorder, rename or delete">Library…</button>
           <button type="button" id="job-unload" title="Unload the program (it stays in the library)">✕</button>
           <span id="job-name" class="job-name mono"></span>
           <button type="button" id="job-next" class="primary" hidden title="Load the next program of this set">Next</button>
@@ -342,7 +343,7 @@
           <div id="job-table-spacer" class="spacer-rows"></div>
           <div id="job-table-rows" class="rows"></div>
         </div>
-        <label class="small muted"><input type="checkbox" id="job-autoscroll" checked> follow progress</label>
+        <label class="small muted" data-viewer-ok><input type="checkbox" id="job-autoscroll" checked> follow progress</label>
       </section>
       <section class="panel bottom-panel" id="panel-console" data-bottom-body="console" hidden>
         <h2>
@@ -354,7 +355,7 @@
           </span>
         </h2>
         <div id="console-out" class="console-out mono" role="log" aria-live="polite"></div>
-        <form id="console-form" class="console-form" autocomplete="off">
+        <form id="console-form" class="console-form" autocomplete="off" data-control>
           <input id="console-input" class="mono" placeholder="Command, e.g. $$ or G0 X10" spellcheck="false" list="console-history">
           <datalist id="console-history"></datalist>
           <button title="Send the command to GRBL (Enter). Real-time commands such as ! ~ ? have their own buttons" type="submit">Send</button>
@@ -373,7 +374,7 @@
       </div>
       <button class="close" value="close" title="Close">✕</button>
     </form>
-    <section class="tab-body" data-tab-body="grbl">
+    <section class="tab-body" data-tab-body="grbl" data-control>
       <p class="muted small" id="grbl-settings-note"></p>
       <div class="table-wrap">
         <table class="settings-table">
@@ -383,7 +384,7 @@
       </div>
       <div class="dialog-foot">
         <span id="grbl-settings-status" class="muted small"></span>
-        <a id="grbl-settings-backup" class="button-like" href="#" download="grbl-settings.txt" title="Download the current $$ values as a text file (a backup; lines can be pasted into the console to restore)">Back up $$</a>
+        <a id="grbl-settings-backup" data-viewer-ok class="button-like" href="#" download="grbl-settings.txt" title="Download the current $$ values as a text file (a backup; lines can be pasted into the console to restore)">Back up $$</a>
         <button title="Read $$ from the controller again" type="button" id="grbl-settings-reload">Reload</button>
         <button title="Write the changed values to GRBL ($n=value each); only possible while Idle" type="button" id="grbl-settings-save" class="primary" disabled>Write changes</button>
       </div>
@@ -426,7 +427,7 @@
         <button title="Restore the default keyboard shortcuts" type="button" id="keymap-reset">Restore defaults</button>
       </div>
     </section>
-    <section class="tab-body" data-tab-body="app" hidden>
+    <section class="tab-body" data-tab-body="app" hidden data-control>
       <div class="profile-bar">
         <label for="profile-select" class="small">Profile</label>
         <select id="profile-select" title="Saved sets of application settings and user commands"><option value="">—</option></select>
@@ -499,7 +500,7 @@
       <strong>User commands</strong>
       <button class="close" value="close" title="Close">✕</button>
     </form>
-    <section class="tab-body">
+    <section class="tab-body" data-control>
       <p class="muted small">One G-code line per row, sent in order (each must be acknowledged before the next). <code>{expr}</code> inserts a value: <code>wx wy wz</code> work position, <code>mx my mz</code> machine position, <code>prbx prby prbz</code> last probe contact (machine), <code>safez</code>; with <code>+ - * /</code>, <code>min() max() abs()</code>, e.g. <code>G0 Z{max(safez, wz + 2)}</code>. A line using a position waits for Idle first; <code>wait idle</code> waits explicitly. Comments: <code>;</code> or <code>( )</code>.</p>
       <div id="macro-list" class="macro-list"></div>
       <div class="dialog-foot">
@@ -600,7 +601,7 @@
       <h3 id="h-zero">Work zero</h3>
       <p>Jog to the work origin and use <b>X0</b>, <b>Y0</b>, <b>Z0</b>, <b>XY0</b> or <b>All 0</b> (<code>G10 L20</code>, kept in GRBL's EEPROM). Tick <i>temporary (G92)</i> for an offset that a reset clears. <b>Go XY0</b> and <b>Go Z0</b> move there, raising to safe Z first.</p>
       <h3 id="h-probe">Probing &amp; heightmaps</h3>
-      <p><b>Probe Z</b> touches off on a plate (thickness in the panel), optionally twice (fast, then slow), and sets work Z. <b>Test</b> checks the probe input first: the probe must read open, then touching when you close the clip on the plate.</p>
+      <p><b>Probe Z</b> touches off on a plate (thickness in the panel), optionally twice (fast, then slow), and sets work Z. <b>Test: open</b> checks that the probe input reads open with nothing touching. <b>Go XY0</b> moves to the work origin (raising to safe Z first) so you can probe Z there.</p>
       <p>For PCB work set a <b>heightmap</b> border (or <b>Auto</b> from a G-code file) and grid, then <b>Probe map</b>. The first point is the reference (Z0); every other point is relative to it. With a map loaded, tick <b>heightmap</b> in the Program panel to stream the compensated program; the server computes it. Maps can be saved, loaded and exchanged with Candle (<code>.map</code>).</p>
       <h3 id="h-job">Jobs</h3>
       <p><b>Open…</b> (or drop a file) uploads a program to the server's library. A <b>.zip</b> of a board's programs becomes a <i>set</i>: pick it in <b>Library…</b>, check the order (back, align, front, drill, cut-out by default), load the first, and use <b>Next</b> after each one. <b>Start</b> runs it; <b>Pause</b> is a feed hold; <b>Stop</b> holds, resets and restores the offsets. To restart part-way, click a line in the table (or type it in <i>from line</i>): the server restores the program state at that line, raises to safe Z, moves above the start, starts the spindle with a dwell and plunges slowly. In the table and the 3D view, grey is done and violet is in GRBL's buffers.</p>
@@ -622,7 +623,7 @@
       <ul>
         <li><b>ALARM after connecting:</b> homing is enabled (<code>$22=1</code>); home or <b>Unlock</b>.</li>
         <li><b>No position in the State panel:</b> set <code>$10=3</code> (GCSender offers this).</li>
-        <li><b>Probe never triggers:</b> use <b>Test</b>; check the clip and the A5 / probe pin wiring.</li>
+        <li><b>Probe never triggers:</b> use <b>Test: open</b>, then a <b>Probe Z</b> with a short <i>max depth</i>; check the clip and the A5 / probe pin wiring.</li>
         <li><b>The board resets when the server starts:</b> normal for this board (DTR). See Recovery.</li>
         <li>Everything sent and received is in <b>Logs → Serial transcripts</b>.</li>
         <li>Something wrong? Press <b>🐞 Report</b> straight away and describe it: the report captures the state at that moment.</li>

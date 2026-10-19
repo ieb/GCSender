@@ -13,6 +13,11 @@ Security model (docs/PLAN.md §6.1) - this server can move a machine:
     header cannot be sent cross-site without a CORS pre-flight, which is
     never answered);
   - the read-only reports token, for ``GET /api/bugreports...`` only.
+* Control is local: only a client on this computer (loopback, or a connection
+  whose source address is our own) may change anything. Other computers are
+  viewers whatever their credential: they read everything and may only make
+  the changes in ``VIEWER_ALLOWED`` (upload programs, organise sets, report
+  a problem).
 * ``Host`` must name this server (DNS-rebinding defence); ``Origin``, when
   present, must equal our own origin; mutating requests must be JSON (this
   also forces a CORS pre-flight for cross-site forms, which we never answer).
@@ -44,6 +49,13 @@ from .events import EventBus
 log = logging.getLogger(__name__)
 
 MAX_JSON_BODY = 1 << 20
+# Changes a viewer (another computer) may make: none of them reach the machine.
+VIEWER_ALLOWED = (
+    ("POST", re.compile(r"^/api/jobs$")),  # upload a program or a zip (not loaded for a viewer)
+    ("PUT", re.compile(r"^/api/jobs/sets/[^/]+$")),  # rename / reorder a set
+    ("POST", re.compile(r"^/api/bugreports$")),
+)
+VIEW_ONLY = "view only: the machine can only be controlled from the browser on the computer running GCSender"
 SSE_KEEPALIVE_S = 15.0
 TOKEN_META = '<meta name="gcs-token" content="">'
 
@@ -66,6 +78,11 @@ class Request:
     @property
     def method(self) -> str:
         return self.handler.command
+
+    @property
+    def control(self) -> bool:
+        """True when the caller may control the machine (it is on this computer)."""
+        return self.handler._client_is_local()
 
     def header(self, name: str) -> str | None:
         return self.handler.headers.get(name)
@@ -233,6 +250,15 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             return False
 
+    def _client_is_local(self) -> bool:
+        """On this computer: loopback, or our own LAN address (source == destination)."""
+        if self._client_is_loopback():
+            return True
+        try:
+            return self.client_address[0] == self.connection.getsockname()[0]
+        except OSError:
+            return False
+
     # -- dispatch -----------------------------------------------------------
 
     def do_GET(self) -> None:
@@ -311,7 +337,7 @@ class Handler(BaseHTTPRequestHandler):
             from_query = supplied is not None
         if supplied:
             if hmac.compare_digest(supplied.encode(), self.server.token.encode()):
-                if from_query and not self._client_is_loopback():
+                if from_query and not self._client_is_local():
                     return None  # keep the full token out of LAN URLs (logs, history); log in instead
                 return {"via": "token"}
             reports = self.server.reports_token
@@ -379,6 +405,7 @@ class Handler(BaseHTTPRequestHandler):
         auth = self.server.auth
         self._json(200, {
             "authenticated": who is not None and who["via"] != "reports-token",
+            "control": self._client_is_local(),
             "via": who["via"] if who else None,
             "user": who.get("user") if who else None,
             "loginAvailable": bool(auth and auth.users.names()),
@@ -395,6 +422,9 @@ class Handler(BaseHTTPRequestHandler):
             self._session_info(query, path)
             return
         self._check_token(query, path)
+        if self.command not in ("GET", "HEAD") and not self._client_is_local():
+            if not any(m == self.command and rx.match(path) for m, rx in VIEWER_ALLOWED):
+                raise ApiError(403, VIEW_ONLY)
         if path == "/api/events" and self.command == "GET":
             self._sse(query)
             return
@@ -433,7 +463,7 @@ class Handler(BaseHTTPRequestHandler):
         ctype = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
         if ctype.startswith("text/") or ctype in ("application/javascript", "application/json"):
             ctype += "; charset=utf-8"
-        if target.name == "index.html" and self._client_is_loopback():
+        if target.name == "index.html" and self._client_is_local():
             body = body.replace(
                 TOKEN_META.encode(), f'<meta name="gcs-token" content="{self.server.token}">'.encode(), 1
             )
